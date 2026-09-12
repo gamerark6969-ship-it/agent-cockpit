@@ -164,9 +164,20 @@ FALLBACK_MODELS = ("deepseek-v4.1-flash", "gemini-3.8-flash", "gemini-flash-late
 STICKY_QUOTA_WAITS = 3
 
 
-def _is_rate_limited(exc: Exception) -> bool:
+_TRANSIENT_LLM_MARKERS = (
+    "429",
+    "RESOURCE_EXHAUSTED",
+    "503",
+    "UNAVAILABLE",
+    "high demand",
+    "overloaded",
+    "overload",
+)
+
+
+def _is_transient_llm_error(exc: Exception) -> bool:
     text = str(exc)
-    return "429" in text or "RESOURCE_EXHAUSTED" in text
+    return any(marker in text for marker in _TRANSIENT_LLM_MARKERS)
 
 
 async def _llm_stream(task_id: str, messages: List[Dict[str, Any]], tool_defs, model: str) -> tuple:
@@ -224,7 +235,7 @@ async def _llm_stream(task_id: str, messages: List[Dict[str, Any]], tool_defs, m
                 raise
             except LLMError as exc:
                 last_exc = exc
-                if not _is_rate_limited(exc):
+                if not _is_transient_llm_error(exc):
                     raise
                 if attempt < attempts - 1:
                     delay = retry_delay_from_error(str(exc)) or 45.0
