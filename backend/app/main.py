@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 
@@ -6,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .api.routes import public_router, router
 from .db import engine, seed_settings
+from .keepalive import keepalive_loop
 from .worker import Worker
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
@@ -23,10 +25,12 @@ async def lifespan(app: FastAPI):
     await seed_settings()
     await worker.resume_interrupted_tasks()
     await worker.start()
+    keepalive_task = asyncio.create_task(keepalive_loop())
     log.info("backend started (worker running)")
     try:
         yield
     finally:
+        keepalive_task.cancel()
         await worker.stop()
         await engine.dispose()
         log.info("backend stopped")
