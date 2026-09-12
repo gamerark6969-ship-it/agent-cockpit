@@ -2,11 +2,11 @@ import uuid
 from datetime import datetime, timezone
 
 from sqlalchemy import (
-    BLOB,
     ForeignKey,
     Index,
     Integer,
     JSON,
+    LargeBinary,
     String,
     Text,
     UniqueConstraint,
@@ -107,7 +107,7 @@ class Artifact(Base):
     filename: Mapped[str] = mapped_column(Text, nullable=False, default="")
     mime: Mapped[str] = mapped_column(Text, nullable=False, default="image/png")
     size: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    data: Mapped[bytes] = mapped_column(BLOB, nullable=False)
+    data: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
 
 
