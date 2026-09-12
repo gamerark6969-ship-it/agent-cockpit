@@ -1,0 +1,47 @@
+services:
+  - type: web
+    name: agent-cockpit-backend
+    runtime: docker
+    plan: free
+    region: oregon
+    rootDir: backend
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: PORT
+        value: "8000"
+      - key: APP_TOKEN
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: AGENTROUTER_BASE_URL
+        value: https://generativelanguage.googleapis.com/v1beta/openai
+      - key: AGENTROUTER_API_KEY
+        sync: false
+      - key: AGENTROUTER_DEFAULT_MODEL
+        value: gemini-2.5-flash
+      - key: E2B_API_KEY
+        sync: false
+      - key: GITHUB_PAT
+        sync: false
+      - key: VAPID_PUBLIC_KEY
+        sync: false
+      - key: VAPID_PRIVATE_KEY
+        sync: false
+      - key: VAPID_SUBJECT
+        sync: false
+
+  - type: web
+    name: agent-cockpit-pwa
+    runtime: static
+    rootDir: pwa
+    buildCommand: npm ci && npm run build
+    staticPublishPath: dist
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    envVars:
+      - key: VITE_API_BASE
+        value: https://agent-cockpit-backend.onrender.com
