@@ -26,6 +26,10 @@ class Settings(BaseSettings):
 
     GITHUB_PAT: Optional[str] = None
 
+    # Stable key material for encrypting connector secrets at rest.
+    # Falls back to APP_TOKEN so existing deployments keep working.
+    CONNECTOR_SECRET: Optional[str] = None
+
     VAPID_PUBLIC_KEY: Optional[str] = None
     VAPID_PRIVATE_KEY: Optional[str] = None
     VAPID_SUBJECT: str = "mailto:admin@example.com"

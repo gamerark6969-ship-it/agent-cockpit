@@ -2,6 +2,7 @@ import uuid
 from datetime import datetime, timezone
 
 from sqlalchemy import (
+    Boolean,
     DateTime,
     ForeignKey,
     Index,
@@ -32,7 +33,9 @@ class Project(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     name: Mapped[str] = mapped_column(Text, nullable=False)
-    repo_url: Mapped[str] = mapped_column(Text, nullable=False)
+    # "repo" = coding workspace bound to a git repo; "chat" = general assistant thread.
+    kind: Mapped[str] = mapped_column(Text, nullable=False, default="repo")
+    repo_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     default_branch: Mapped[str] = mapped_column(Text, nullable=False, default="main")
     settings: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
@@ -126,3 +129,16 @@ class Setting(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     data: Mapped[dict] = mapped_column(JSON, default=dict)
+
+
+class Connector(Base):
+    __tablename__ = "connectors"
+    __table_args__ = (UniqueConstraint("kind", name="uq_connectors_kind"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    kind: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    config_enc: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)

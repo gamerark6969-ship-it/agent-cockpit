@@ -91,7 +91,7 @@ export default function ProjectDetail() {
 
   return (
     <div className="safe-top px-4 pt-4">
-      <Link to="/" className="mb-3 inline-block text-xs text-zinc-500">
+      <Link to="/projects" className="mb-3 inline-block text-xs text-zinc-500">
         ← Projects
       </Link>
       <div className="mb-4 flex items-start justify-between gap-3">

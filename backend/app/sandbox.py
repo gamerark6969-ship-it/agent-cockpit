@@ -8,6 +8,7 @@ from .config import settings
 
 MAX_OUTPUT_CHARS = 8000
 REPO_DIR = "/home/user/repo"
+WORK_DIR = "/home/user/work"
 
 _TOKEN_PATTERNS = [
     re.compile(r"x-access-token:[^@\s'\"]+"),
@@ -122,6 +123,47 @@ async def create_task_sandbox(task_id: str, repo_url: str, default_branch: str =
         if isinstance(exc, SandboxError):
             raise
         raise SandboxError(f"failed to set up repo in sandbox: {exc}") from exc
+
+
+async def _sandbox_envs() -> dict:
+    envs = {"GIT_TERMINAL_PROMPT": "0"}
+    pat = settings.GITHUB_PAT
+    if pat:
+        envs["GITHUB_PAT"] = pat
+        envs["GITHUB_TOKEN"] = pat
+    return envs
+
+
+async def create_scratch_sandbox(task_id: str) -> AsyncSandbox:
+    """Create a sandbox with no repository: a general-purpose Linux workspace for chat tasks."""
+    key = _require_key()
+    envs = await _sandbox_envs()
+    try:
+        sbx = await AsyncSandbox.create(api_key=key, envs=envs, timeout=settings.SANDBOX_TIMEOUT_S)
+    except Exception as exc:
+        raise SandboxUnavailable(f"failed to create sandbox: {exc}") from exc
+    try:
+        setup = "set -e\n"
+        setup += "git config --global user.email agent@example.com\n"
+        setup += "git config --global user.name 'AI Agent'\n"
+        if settings.GITHUB_PAT:
+            setup += "printf '#!/bin/sh\\necho \"$GITHUB_PAT\"\\n' > /usr/local/bin/git-token-askpass\n"
+            setup += "chmod +x /usr/local/bin/git-token-askpass\n"
+            setup += "git config --global core.askpass /usr/local/bin/git-token-askpass\n"
+        setup += f"mkdir -p {_sh(WORK_DIR)}\n"
+        result = await sbx.commands.run(setup, timeout=120)
+        if result.exit_code != 0:
+            out = (result.stdout or "") + (result.stderr or "")
+            raise SandboxError(f"scratch sandbox setup failed: {out[:500]}")
+        return sbx
+    except Exception as exc:
+        try:
+            await sbx.kill()
+        except Exception:
+            pass
+        if isinstance(exc, SandboxError):
+            raise
+        raise SandboxError(f"failed to set up scratch sandbox: {exc}") from exc
 
 
 async def connect(sandbox_id: str) -> AsyncSandbox:

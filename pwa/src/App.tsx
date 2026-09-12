@@ -3,6 +3,9 @@ import { BrowserRouter, Navigate, Route, Routes, useLocation } from "react-route
 import BottomNav from "./components/BottomNav";
 import { getToken } from "./lib/api";
 import Approvals from "./pages/Approvals";
+import Chat from "./pages/Chat";
+import Chats from "./pages/Chats";
+import Connectors from "./pages/Connectors";
 import Login from "./pages/Login";
 import ProjectDetail from "./pages/ProjectDetail";
 import Projects from "./pages/Projects";
@@ -26,7 +29,31 @@ function Shell() {
             path="/"
             element={
               <RequireAuth>
+                <Chats />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/c/:id"
+            element={
+              <RequireAuth>
+                <Chat />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/projects"
+            element={
+              <RequireAuth>
                 <Projects />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/connectors"
+            element={
+              <RequireAuth>
+                <Connectors />
               </RequireAuth>
             }
           />

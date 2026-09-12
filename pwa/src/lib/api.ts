@@ -69,10 +69,21 @@ export type TaskStatus =
 export interface Project {
   id: string;
   name: string;
-  repo_url: string;
+  kind: string;
+  repo_url: string | null;
   default_branch: string;
   settings: Record<string, unknown>;
   created_at: string;
+}
+
+export interface Connector {
+  id: string;
+  kind: string;
+  name: string;
+  enabled: boolean;
+  config: Record<string, string>;
+  created_at: string;
+  updated_at: string | null;
 }
 
 export interface Task {
@@ -161,9 +172,10 @@ export function getProject(id: string) {
 }
 
 export function createProject(body: {
-  repo_url: string;
+  repo_url?: string;
   name?: string;
   default_branch?: string;
+  kind?: "repo" | "chat";
 }) {
   return apiFetch<Project>("/api/projects", {
     method: "POST",
@@ -258,4 +270,36 @@ export function putSettings(body: AppSettings) {
 
 export function listModels() {
   return apiFetch<{ models: string[] }>("/api/models");
+}
+
+// ── connectors ──────────────────────────────────────────
+
+export function listConnectors() {
+  return apiFetch<Connector[]>("/api/connectors");
+}
+
+export function createConnector(body: {
+  kind: string;
+  name?: string;
+  config?: Record<string, string>;
+  enabled?: boolean;
+}) {
+  return apiFetch<Connector>("/api/connectors", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export function updateConnector(
+  id: string,
+  body: { name?: string; config?: Record<string, string>; enabled?: boolean },
+) {
+  return apiFetch<Connector>(`/api/connectors/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(body),
+  });
+}
+
+export function deleteConnector(id: string) {
+  return apiFetch<void>(`/api/connectors/${id}`, { method: "DELETE" });
 }

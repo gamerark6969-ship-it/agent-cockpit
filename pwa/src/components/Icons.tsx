@@ -127,3 +127,35 @@ export function TrashIcon({ className = base }: IconProps) {
     </svg>
   );
 }
+
+export function ChatIcon({ className = base }: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={className}>
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M21 12a8 8 0 0 1-8 8H5l-2 2V12a8 8 0 0 1 8-8h2a8 8 0 0 1 8 8Z"
+      />
+    </svg>
+  );
+}
+
+export function PlugIcon({ className = base }: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={className}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M9 3v5M15 3v5M7 8h10v3a5 5 0 0 1-5 5 5 5 0 0 1-5-5V8ZM12 16v5" />
+    </svg>
+  );
+}
+
+export function RepoIcon({ className = base }: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={className}>
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M5 4h11a2 2 0 0 1 2 2v13a1 1 0 0 1-1.5.9L12 17.5 7.5 19.9A1 1 0 0 1 6 19V5a1 1 0 0 1 1-1Zm0 0v14"
+      />
+    </svg>
+  );
+}

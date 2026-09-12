@@ -8,15 +8,17 @@ from pydantic import BaseModel, Field, field_validator
 
 
 class ProjectCreate(BaseModel):
-    repo_url: str
+    repo_url: Optional[str] = None
     name: Optional[str] = None
     default_branch: Optional[str] = None
+    kind: Literal["repo", "chat"] = "repo"
 
 
 class ProjectOut(BaseModel):
     id: str
     name: str
-    repo_url: str
+    kind: str = "repo"
+    repo_url: Optional[str] = None
     default_branch: str
     settings: dict = Field(default_factory=dict)
     created_at: datetime
@@ -143,7 +145,13 @@ class Permissions(BaseModel):
         default_factory=lambda: {
             "browser_*": "auto",
             "web_fetch": "auto",
+            "web_search": "auto",
             "git_push": "auto",
+            "gmail_read": "auto",
+            "gmail_search": "auto",
+            "gmail_send": "ask",
+            "slack_post_message": "ask",
+            "github_create_issue": "ask",
         }
     )
 
@@ -174,3 +182,29 @@ class SettingsIn(SettingsOut):
 
 class ModelsOut(BaseModel):
     models: List[str]
+
+
+# ── Connectors ───────────────────────────────────────────
+
+
+class ConnectorCreate(BaseModel):
+    kind: str
+    name: Optional[str] = None
+    config: dict = Field(default_factory=dict)
+    enabled: bool = True
+
+
+class ConnectorUpdate(BaseModel):
+    name: Optional[str] = None
+    config: Optional[dict] = None
+    enabled: Optional[bool] = None
+
+
+class ConnectorOut(BaseModel):
+    id: str
+    kind: str
+    name: str
+    enabled: bool
+    config: dict = Field(default_factory=dict)
+    created_at: datetime
+    updated_at: Optional[datetime] = None

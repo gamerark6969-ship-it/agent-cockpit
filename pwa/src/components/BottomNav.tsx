@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { NavLink } from "react-router-dom";
 import { listApprovals } from "../lib/api";
-import { ListIcon, SettingsIcon, WarningIcon } from "./Icons";
+import { ChatIcon, PlugIcon, SettingsIcon, WarningIcon } from "./Icons";
 
 const itemBase = "flex flex-1 flex-col items-center justify-center gap-1 py-2 text-[11px]";
 const inactive = "text-zinc-500";
@@ -32,8 +32,15 @@ export default function BottomNav() {
     <nav className="safe-bottom fixed inset-x-0 bottom-0 z-30 border-t border-zinc-800 bg-zinc-950/95 backdrop-blur">
       <div className="mx-auto flex max-w-md">
         <NavLink to="/" end className={({ isActive }) => `${itemBase} ${isActive ? active : inactive}`}>
-          <ListIcon className="h-5 w-5" />
-          Projects
+          <ChatIcon className="h-5 w-5" />
+          Chats
+        </NavLink>
+        <NavLink
+          to="/connectors"
+          className={({ isActive }) => `${itemBase} ${isActive ? active : inactive}`}
+        >
+          <PlugIcon className="h-5 w-5" />
+          Connectors
         </NavLink>
         <NavLink
           to="/approvals"

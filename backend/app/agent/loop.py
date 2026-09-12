@@ -7,14 +7,15 @@ from typing import Any, Dict, List, Optional, Tuple
 from sqlalchemy import delete, func, select
 
 from .. import sandbox as sbx_mod
+from .. import compute
 from .. import push
 from ..db import SessionLocal, get_settings_data
 from ..events import append_event
 from ..llm import LLMError, LLMNotConfigured, llm
 from ..models import Approval, Message, Task, Project, new_id, utcnow
 from ..permissions import evaluate
-from .prompts import COMPACTION_PROMPT, SYSTEM_PROMPT
-from .tools import TOOL_DEFINITIONS, ToolContext, dispatch
+from .prompts import COMPACTION_PROMPT, GENERAL_SYSTEM_PROMPT, SYSTEM_PROMPT
+from .tools import ToolContext, all_tool_definitions, dispatch
 
 log = logging.getLogger("agent")
 
@@ -62,6 +63,45 @@ async def _load_messages(task_id: str) -> List[Dict[str, Any]]:
             msg["name"] = "tool"
         out.append(msg)
     return out
+
+
+def _is_internal_user_text(text: str) -> bool:
+    return text.startswith("[") or text.startswith("If you have fully answered") or text.startswith(
+        "Continue with the task"
+    )
+
+
+async def _load_thread_history(project_id: str, exclude_task: str, max_turns: int = 40) -> List[Dict[str, Any]]:
+    """Prior completed turns in a chat thread as plain user/assistant text for context."""
+    async with SessionLocal() as session:
+        tasks = (
+            await session.execute(
+                select(Task)
+                .where(Task.project_id == project_id, Task.id != exclude_task, Task.status == "done")
+                .order_by(Task.created_at)
+            )
+        ).scalars().all()
+        history: List[Dict[str, Any]] = []
+        for t in tasks:
+            rows = (
+                await session.execute(
+                    select(Message).where(Message.task_id == t.id).order_by(Message.seq)
+                )
+            ).scalars().all()
+            user_texts = [
+                (m.content or "").strip()
+                for m in rows
+                if m.role == "user" and (m.content or "").strip() and not _is_internal_user_text((m.content or "").strip())
+            ]
+            assistant_texts = [
+                (m.content or "").strip() for m in rows if m.role == "assistant" and (m.content or "").strip()
+            ]
+            if user_texts:
+                history.append({"role": "user", "content": user_texts[0][:4000]})
+            final = (t.result_summary or "").strip() or (assistant_texts[-1] if assistant_texts else "")
+            if final:
+                history.append({"role": "assistant", "content": final[:4000]})
+    return history[-max_turns:]
 
 
 async def _update_task(task_id: str, **fields) -> None:
@@ -231,7 +271,7 @@ async def _setup_sandbox(task: Task, project: Project, resume: bool) -> Tuple[Op
                 "with a fresh clone of the repository: prior file changes were LOST. Check git log / "
                 "your summary above, and re-do the needed work (edits, commits)."
             )
-    sbx = await sbx_mod.create_task_sandbox(task.id, project.repo_url, project.default_branch)
+    sbx = await compute.create_repo_sandbox(task.id, project.repo_url, project.default_branch)
     return sbx, reset_note
 
 
@@ -316,44 +356,70 @@ async def run_agent_loop(task_id: str, worker) -> None:
     command_timeout_s = int(settings_data.get("command_timeout_s") or 600)
     approval_timeout_s = int(settings_data.get("approval_timeout_s") or 1800)
 
+    is_chat = (project.kind or "repo") == "chat"
+    tool_defs = all_tool_definitions()
+    ctx: Optional[ToolContext] = None
+
     # fresh start bookkeeping
     if not resume:
-        await _emit(task_id, "task_started", {"model": model})
+        await _emit(task_id, "task_started", {"model": model, "kind": project.kind or "repo"})
         await _update_task(task_id, status="running", model=model)
 
-    # sandbox
-    try:
-        sbx, reset_note = await _setup_sandbox(task, project, resume)
-    except sbx_mod.SandboxUnavailable as exc:
-        await _finish_failed(task_id, str(exc))
-        return
-    except sbx_mod.SandboxError as exc:
-        await _finish_failed(task_id, f"sandbox error: {exc}")
-        return
+    # sandbox: repo tasks always get one; chat tasks create one lazily on first sandbox use
+    sbx = None
+    reset_note = None
+    branch = None
+    sandbox_id = ""
+    if is_chat:
+        if resume and task.sandbox_id:
+            try:
+                sbx = await sbx_mod.connect(task.sandbox_id)
+            except sbx_mod.SandboxError:
+                sbx = None
+    else:
+        try:
+            sbx, reset_note = await _setup_sandbox(task, project, resume)
+        except sbx_mod.SandboxUnavailable as exc:
+            await _finish_failed(task_id, str(exc))
+            return
+        except sbx_mod.SandboxError as exc:
+            await _finish_failed(task_id, f"sandbox error: {exc}")
+            return
 
     try:
-        sandbox_id = getattr(sbx, "sandbox_id", None) or ""
-        await sbx_mod.keep_alive(sbx)
-        await _update_task(task_id, sandbox_id=sandbox_id)
-        short_id = task_id.replace("-", "")[:8]
-        await _ensure_branch(sbx, short_id)
-        branch = f"agent/{short_id}"
+        if sbx is not None:
+            sandbox_id = getattr(sbx, "sandbox_id", None) or ""
+            await sbx_mod.keep_alive(sbx)
+            await _update_task(task_id, sandbox_id=sandbox_id)
+        if is_chat:
+            short_id = ""
+        else:
+            short_id = task_id.replace("-", "")[:8]
+            await _ensure_branch(sbx, short_id)
+            branch = f"agent/{short_id}"
 
         # conversation
         messages = await _load_messages(task_id)
         if not messages:
-            user_prompt = (
-                f"Repository: {project.repo_url} (default branch: {project.default_branch}), "
-                f"cloned at {sbx_mod.REPO_DIR} in your sandbox. Your working branch: {branch}.\n\n"
-                f"Task:\n{task.prompt}"
-            )
-            messages = [
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": user_prompt},
-            ]
-            await _save_message(task_id, messages[0])
-            await _save_message(task_id, messages[1])
-        elif reset_note:
+            if is_chat:
+                history = await _load_thread_history(project.id, task_id)
+                messages = [{"role": "system", "content": GENERAL_SYSTEM_PROMPT}, *history]
+                messages.append({"role": "user", "content": task.prompt})
+                await _save_message(task_id, messages[0])
+                await _save_message(task_id, messages[-1])
+            else:
+                user_prompt = (
+                    f"Repository: {project.repo_url} (default branch: {project.default_branch}), "
+                    f"cloned at {sbx_mod.REPO_DIR} in your sandbox. Your working branch: {branch}.\n\n"
+                    f"Task:\n{task.prompt}"
+                )
+                messages = [
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": user_prompt},
+                ]
+                await _save_message(task_id, messages[0])
+                await _save_message(task_id, messages[1])
+        elif reset_note and sbx is not None:
             note = {"role": "user", "content": f"[SYSTEM NOTE] {reset_note}"}
             messages.append(note)
             await _save_message(task_id, note)
@@ -365,6 +431,8 @@ async def run_agent_loop(task_id: str, worker) -> None:
             settings_data=settings_data,
             command_timeout_s=command_timeout_s,
             default_branch=project.default_branch,
+            kind=project.kind or "repo",
+            repo_dir=(sbx_mod.WORK_DIR if is_chat else sbx_mod.REPO_DIR),
             extras={},
         )
 
@@ -398,8 +466,10 @@ async def run_agent_loop(task_id: str, worker) -> None:
                 await _finish_failed(task_id, f"token budget exhausted ({tokens_used}/{token_budget})")
                 return
 
-            # extend sandbox lifetime before doing more work
-            await sbx_mod.keep_alive(sbx)
+            # extend sandbox lifetime before doing more work (sandbox may be lazily created in a tool)
+            if ctx is not None and ctx.sandbox is not None:
+                await sbx_mod.keep_alive(ctx.sandbox)
+                sandbox_id = getattr(ctx.sandbox, "sandbox_id", None) or sandbox_id
 
             # steer injection
             for note_text in worker.drain_steer(task_id):
@@ -410,7 +480,7 @@ async def run_agent_loop(task_id: str, worker) -> None:
             # LLM call
             try:
                 assistant = await llm.chat(
-                    [_wire_msg(m) for m in messages], tools=TOOL_DEFINITIONS, model=model
+                    [_wire_msg(m) for m in messages], tools=tool_defs, model=model
                 )
             except LLMNotConfigured:
                 await _finish_failed(task_id, "AGENTROUTER_BASE_URL/AGENTROUTER_API_KEY not configured")
@@ -438,13 +508,17 @@ async def run_agent_loop(task_id: str, worker) -> None:
                 await _emit(task_id, "agent_message", {"content": content})
 
             if not tool_calls:
-                nudge = {
-                    "role": "user",
-                    "content": (
+                if is_chat:
+                    nudge_text = (
+                        "If you have fully answered the user, call the finish tool now with your answer "
+                        "in result_summary. Otherwise, continue working with tools."
+                    )
+                else:
+                    nudge_text = (
                         "Continue with the task. When it is fully complete (changes committed, pushed, "
                         "PR opened), call the finish tool with a result summary."
-                    ),
-                }
+                    )
+                nudge = {"role": "user", "content": nudge_text}
                 messages.append(nudge)
                 await _save_message(task_id, nudge)
                 await _checkpoint(task_id, iterations, tokens_used, sandbox_id, sbx)
@@ -485,7 +559,8 @@ async def run_agent_loop(task_id: str, worker) -> None:
         log.exception("unhandled error in agent loop for %s", task_id)
         await _finish_failed(task_id, f"internal error: {type(exc).__name__}: {exc}")
     finally:
-        await _release_sandbox_after_terminal(task_id, sbx)
+        active_sbx = ctx.sandbox if ctx is not None else sbx
+        await _release_sandbox_after_terminal(task_id, active_sbx)
 
 
 # Once a task reaches a terminal state the sandbox is no longer needed for work.
@@ -495,6 +570,8 @@ TERMINAL_SANDBOX_GRACE_S = 900
 
 
 async def _release_sandbox_after_terminal(task_id: str, sbx) -> None:
+    if sbx is None:
+        return
     try:
         current = await _get_task(task_id)
         if current and current.status in ("done", "failed", "stopped"):
@@ -711,6 +788,10 @@ async def _handle_dangling(
 
 
 async def _checkpoint(task_id: str, iterations: int, tokens_used: int, sandbox_id: str, sbx) -> None:
+    if sbx is None:
+        await _update_task(task_id, iterations=iterations, tokens_used=tokens_used, sandbox_id=sandbox_id)
+        await _emit(task_id, "checkpoint", {"iteration": iterations, "sandbox_alive": None})
+        return
     alive = True
     try:
         result = await sbx.commands.run("true", timeout=15)

@@ -9,6 +9,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from .. import connectors as connectors_mod
 from .. import sandbox as sbx_mod
 from ..db import SessionLocal, get_settings_data, save_settings
 from ..events import subscribe, unsubscribe
@@ -26,6 +27,9 @@ from ..models import (
 from ..schemas import (
     ApprovalDecision,
     ApprovalOut,
+    ConnectorCreate,
+    ConnectorOut,
+    ConnectorUpdate,
     DiffFile,
     DiffOut,
     EventOut,
@@ -80,6 +84,7 @@ def _project_out(p: Project) -> ProjectOut:
     return ProjectOut(
         id=p.id,
         name=p.name,
+        kind=p.kind or "repo",
         repo_url=p.repo_url,
         default_branch=p.default_branch,
         settings=p.settings or {},
@@ -96,13 +101,23 @@ async def list_projects():
 
 @router.post("/api/projects", response_model=ProjectOut, status_code=201)
 async def create_project(body: ProjectCreate):
-    repo_url = body.repo_url.strip()
-    if not repo_url.startswith("https://"):
-        raise HTTPException(status_code=422, detail="repo_url must be an https:// URL")
-    name = body.name or repo_url.rstrip("/").split("/")[-1] or "project"
+    repo_url = (body.repo_url or "").strip() or None
+    kind = body.kind
+    if kind == "repo":
+        if not repo_url or not repo_url.startswith("https://"):
+            raise HTTPException(status_code=422, detail="repo_url must be an https:// URL")
+    else:
+        repo_url = None
+    if body.name:
+        name = body.name
+    elif repo_url:
+        name = repo_url.rstrip("/").split("/")[-1] or "project"
+    else:
+        name = "New chat"
     async with SessionLocal() as session:
         project = Project(
             name=name,
+            kind=kind,
             repo_url=repo_url,
             default_branch=body.default_branch or "main",
         )
@@ -525,3 +540,39 @@ async def list_models():
         log.warning("models proxy failed: %s", exc)
         raise HTTPException(status_code=502, detail=f"failed to fetch models: {exc}")
     return ModelsOut(models=models)
+
+
+# ── connectors ───────────────────────────────────────────
+
+
+@router.get("/api/connectors", response_model=list[ConnectorOut])
+async def list_connectors():
+    rows = await connectors_mod.list_connectors()
+    return [ConnectorOut(**connectors_mod.to_out(c)) for c in rows]
+
+
+@router.post("/api/connectors", response_model=ConnectorOut, status_code=201)
+async def create_connector(body: ConnectorCreate):
+    if body.kind not in connectors_mod.KNOWN_KINDS:
+        raise HTTPException(status_code=422, detail=f"unknown connector kind '{body.kind}'")
+    connector = await connectors_mod.upsert(
+        body.kind, name=body.name, config=body.config, enabled=body.enabled
+    )
+    return ConnectorOut(**connectors_mod.to_out(connector))
+
+
+@router.put("/api/connectors/{connector_id}", response_model=ConnectorOut)
+async def update_connector(connector_id: str, body: ConnectorUpdate):
+    connector = await connectors_mod.update(
+        connector_id, name=body.name, config=body.config, enabled=body.enabled
+    )
+    if connector is None:
+        raise HTTPException(status_code=404, detail="connector not found")
+    return ConnectorOut(**connectors_mod.to_out(connector))
+
+
+@router.delete("/api/connectors/{connector_id}", status_code=204)
+async def delete_connector(connector_id: str):
+    if not await connectors_mod.delete(connector_id):
+        raise HTTPException(status_code=404, detail="connector not found")
+    return Response(status_code=204)

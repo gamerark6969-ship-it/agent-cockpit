@@ -6,6 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .api.routes import public_router, router
+from .connectors import seed_from_env as seed_connectors_from_env
 from .db import engine, seed_settings
 from .keepalive import keepalive_loop
 from .worker import Worker
@@ -23,6 +24,7 @@ async def lifespan(app: FastAPI):
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     await seed_settings()
+    await seed_connectors_from_env()
     await worker.resume_interrupted_tasks()
     await worker.start()
     keepalive_task = asyncio.create_task(keepalive_loop())

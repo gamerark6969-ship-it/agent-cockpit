@@ -13,7 +13,8 @@ from ..db import SessionLocal
 from ..events import append_event
 from ..models import Artifact, Message, new_id
 from .. import sandbox as sbx_mod
-from ..sandbox import REPO_DIR, SandboxError, mask_secrets
+from .. import compute
+from ..sandbox import REPO_DIR, WORK_DIR, SandboxError, mask_secrets
 
 MAX_WEBFETCH_CHARS = 20000
 
@@ -239,6 +240,12 @@ TOOL_DEFINITIONS: List[dict] = [
 ]
 
 
+def all_tool_definitions() -> List[dict]:
+    from .connector_tools import CONNECTOR_TOOL_DEFINITIONS
+
+    return TOOL_DEFINITIONS + CONNECTOR_TOOL_DEFINITIONS
+
+
 @dataclass
 class ToolContext:
     task_id: str
@@ -246,7 +253,29 @@ class ToolContext:
     settings_data: dict
     command_timeout_s: int = 600
     default_branch: str = "main"
+    kind: str = "repo"
+    repo_dir: str = REPO_DIR
     extras: Dict[str, Any] = field(default_factory=dict)
+
+    async def ensure_sandbox(self):
+        """Chat tasks start without a sandbox; create a scratch one on first sandbox tool use."""
+        if self.sandbox is not None:
+            return self.sandbox
+        if self.kind != "chat":
+            raise SandboxError("no sandbox is configured for this task")
+        await _emit(
+            self.task_id,
+            "terminal",
+            {
+                "command": "creating ephemeral Linux sandbox",
+                "exit_code": 0,
+                "output": "spinning up a sandbox for code/command execution (first use in this chat)...",
+                "truncated": False,
+            },
+        )
+        self.sandbox = await compute.create_scratch_sandbox(self.task_id)
+        self.repo_dir = WORK_DIR
+        return self.sandbox
 
 
 # ── helpers ──────────────────────────────────────────────
@@ -270,12 +299,13 @@ async def _emit_terminal(ctx: ToolContext, command: str, result: dict) -> None:
     )
 
 
-def _repo_path(path: str) -> str:
+def _repo_path(path: str, ctx: "ToolContext") -> str:
+    base = ctx.repo_dir or REPO_DIR
     if not path:
-        return REPO_DIR
+        return base
     if path.startswith("/") or path.startswith("~"):
         return path
-    return f"{REPO_DIR}/{path}"
+    return f"{base}/{path}"
 
 
 _TAG_RE = re.compile(r"<[^>]+>")
@@ -346,7 +376,8 @@ main()
 
 async def _ensure_playwright(ctx: ToolContext) -> Optional[str]:
     """Lazy-install playwright + chromium on first browser use. Returns error or None."""
-    probe = await sbx_mod.run_command(ctx.sandbox, "python -c 'import playwright' 2>/dev/null", timeout=60)
+    sbx = await ctx.ensure_sandbox()
+    probe = await sbx_mod.run_command(sbx, "python -c 'import playwright' 2>/dev/null", timeout=60)
     if probe["exit_code"] == 0:
         return None
     install_cmd = "pip install --quiet playwright && python -m playwright install chromium --with-deps"
@@ -360,7 +391,7 @@ async def _ensure_playwright(ctx: ToolContext) -> Optional[str]:
             "truncated": False,
         },
     )
-    result = await sbx_mod.run_command(ctx.sandbox, install_cmd, timeout=900)
+    result = await sbx_mod.run_command(sbx, install_cmd, timeout=900)
     if result["exit_code"] != 0:
         return f"playwright install failed: {result['output'][:2000]}"
     return None
@@ -370,12 +401,13 @@ async def _run_browser(ctx: ToolContext, action: str, args: dict) -> Tuple[bool,
     err = await _ensure_playwright(ctx)
     if err:
         return False, err, None
-    await sbx_mod.write_file(ctx.sandbox, "/tmp/agent_browser.py", BROWSER_SCRIPT)
+    sbx = await ctx.ensure_sandbox()
+    await sbx_mod.write_file(sbx, "/tmp/agent_browser.py", BROWSER_SCRIPT)
     args_json = json.dumps(args)
     import shlex
 
     cmd = f"python /tmp/agent_browser.py {shlex.quote(action)} {shlex.quote(args_json)} 2>&1"
-    result = await sbx_mod.run_command(ctx.sandbox, cmd, timeout=180)
+    result = await sbx_mod.run_command(sbx, cmd, timeout=180)
     await _emit_terminal(ctx, f"browser_{action}({args_json})", result)
     if result["exit_code"] != 0:
         return False, result["output"], None
@@ -391,14 +423,15 @@ async def _run_browser(ctx: ToolContext, action: str, args: dict) -> Tuple[bool,
 
 
 async def _read_screenshot_bytes(ctx: ToolContext) -> Optional[bytes]:
+    sbx = await ctx.ensure_sandbox()
     try:
-        data = await ctx.sandbox.files.read("/tmp/screenshot.png", format="bytes")
+        data = await sbx.files.read("/tmp/screenshot.png", format="bytes")
         if isinstance(data, bytes):
             return data
     except Exception:
         pass
     try:
-        result = await ctx.sandbox.commands.run("base64 -w0 /tmp/screenshot.png", timeout=60)
+        result = await sbx.commands.run("base64 -w0 /tmp/screenshot.png", timeout=60)
         if result.exit_code == 0 and result.stdout:
             return base64.b64decode(result.stdout.strip())
     except Exception:
@@ -423,17 +456,19 @@ async def _dispatch(ctx: ToolContext, tool: str, args: dict) -> Tuple[bool, str,
     sbx = ctx.sandbox
 
     if tool == "bash":
+        sbx = await ctx.ensure_sandbox()
         command = str(args.get("command", ""))
         timeout = int(args.get("timeout") or 300)
         timeout = max(5, min(timeout, ctx.command_timeout_s))
-        result = await sbx_mod.run_command(sbx, f"cd {REPO_DIR} && {command}", timeout=timeout)
+        result = await sbx_mod.run_command(sbx, f"cd {ctx.repo_dir} && {command}", timeout=timeout)
         await _emit_terminal(ctx, command, result)
         ok = result["exit_code"] == 0
         summary = result["output"] or f"(no output, exit code {result['exit_code']})"
         return ok, summary, None
 
     if tool == "read_file":
-        path = _repo_path(str(args.get("path", "")))
+        sbx = await ctx.ensure_sandbox()
+        path = _repo_path(str(args.get("path", "")), ctx)
         result = await sbx_mod.read_file(sbx, path)
         await _emit_terminal(ctx, f"cat {path}", result)
         if result["exit_code"] != 0:
@@ -441,13 +476,15 @@ async def _dispatch(ctx: ToolContext, tool: str, args: dict) -> Tuple[bool, str,
         return True, result["output"], None
 
     if tool == "write_file":
-        path = _repo_path(str(args.get("path", "")))
+        sbx = await ctx.ensure_sandbox()
+        path = _repo_path(str(args.get("path", "")), ctx)
         content = str(args.get("content", ""))
         result = await sbx_mod.write_file(sbx, path, content)
         return result["exit_code"] == 0, result["output"], None
 
     if tool == "edit_file":
-        path = _repo_path(str(args.get("path", "")))
+        sbx = await ctx.ensure_sandbox()
+        path = _repo_path(str(args.get("path", "")), ctx)
         old_string = str(args.get("old_string", ""))
         new_string = str(args.get("new_string", ""))
         if not old_string:
@@ -470,21 +507,24 @@ async def _dispatch(ctx: ToolContext, tool: str, args: dict) -> Tuple[bool, str,
         return True, f"edited {path}: replaced {len(old_string)} chars with {len(new_string)} chars", None
 
     if tool == "list_dir":
-        path = _repo_path(str(args.get("path", ".")))
+        sbx = await ctx.ensure_sandbox()
+        path = _repo_path(str(args.get("path", ".")), ctx)
         result = await sbx_mod.list_dir(sbx, path)
         await _emit_terminal(ctx, f"ls -la {path}", result)
         return result["exit_code"] == 0, result["output"], None
 
     if tool == "glob":
+        sbx = await ctx.ensure_sandbox()
         pattern = str(args.get("pattern", "*"))
-        path = _repo_path(str(args.get("path", ".")))
+        path = _repo_path(str(args.get("path", ".")), ctx)
         result = await sbx_mod.glob_files(sbx, pattern, path)
         await _emit_terminal(ctx, f"glob {pattern} in {path}", result)
         return result["exit_code"] == 0, result["output"], None
 
     if tool == "grep":
+        sbx = await ctx.ensure_sandbox()
         pattern = str(args.get("pattern", ""))
-        path = _repo_path(str(args.get("path", ".")))
+        path = _repo_path(str(args.get("path", ".")), ctx)
         result = await sbx_mod.grep_files(sbx, pattern, path)
         await _emit_terminal(ctx, f"grep -rn {pattern} {path}", result)
         return result["exit_code"] == 0, result["output"], None
@@ -492,23 +532,25 @@ async def _dispatch(ctx: ToolContext, tool: str, args: dict) -> Tuple[bool, str,
     if tool == "git_commit":
         import shlex
 
+        sbx = await ctx.ensure_sandbox()
         message = str(args.get("message", "update"))
-        cmd = f"cd {REPO_DIR} && git add -A && git commit -m {shlex.quote(message)}"
+        cmd = f"cd {ctx.repo_dir} && git add -A && git commit -m {shlex.quote(message)}"
         result = await sbx_mod.run_command(sbx, cmd, timeout=120)
         await _emit_terminal(ctx, f"git add -A && git commit -m {shlex.quote(message)}", result)
         if result["exit_code"] != 0:
             if "nothing to commit" in result["output"]:
                 return True, "nothing to commit (working tree clean)", None
             return False, result["output"], None
-        branch = await sbx_mod.run_command(sbx, f"cd {REPO_DIR} && git rev-parse --abbrev-ref HEAD", timeout=30)
+        branch = await sbx_mod.run_command(sbx, f"cd {ctx.repo_dir} && git rev-parse --abbrev-ref HEAD", timeout=30)
         ctx.extras["branch"] = branch["output"].strip()
         return True, result["output"] or "committed", None
 
     if tool == "git_push":
-        cmd = f"cd {REPO_DIR} && git push -u origin HEAD 2>&1 | sed -e 's|x-access-token:[^@]*@|x-access-token:***@|g'"
+        sbx = await ctx.ensure_sandbox()
+        cmd = f"cd {ctx.repo_dir} && git push -u origin HEAD 2>&1 | sed -e 's|x-access-token:[^@]*@|x-access-token:***@|g'"
         result = await sbx_mod.run_command(sbx, cmd, timeout=180)
         await _emit_terminal(ctx, "git push -u origin HEAD", result)
-        branch = await sbx_mod.run_command(sbx, f"cd {REPO_DIR} && git rev-parse --abbrev-ref HEAD", timeout=30)
+        branch = await sbx_mod.run_command(sbx, f"cd {ctx.repo_dir} && git rev-parse --abbrev-ref HEAD", timeout=30)
         if branch["exit_code"] == 0 and branch["output"].strip():
             ctx.extras["branch"] = branch["output"].strip()
         return result["exit_code"] == 0, result["output"], None
@@ -516,10 +558,11 @@ async def _dispatch(ctx: ToolContext, tool: str, args: dict) -> Tuple[bool, str,
     if tool == "create_pr":
         import shlex
 
+        sbx = await ctx.ensure_sandbox()
         title = str(args.get("title", "Update from AI agent"))
         body = str(args.get("body", ""))
         cmd = (
-            f"cd {REPO_DIR} && gh pr create --title {shlex.quote(title)}"
+            f"cd {ctx.repo_dir} && gh pr create --title {shlex.quote(title)}"
             f" --body {shlex.quote(body)} --base {shlex.quote(ctx.default_branch)} 2>&1"
             f" | sed -e 's|x-access-token:[^@]*@|x-access-token:***@|g'"
         )
@@ -613,5 +656,11 @@ async def _dispatch(ctx: ToolContext, tool: str, args: dict) -> Tuple[bool, str,
     if tool == "finish":
         result_summary = str(args.get("result_summary", "") or "task finished")
         return True, result_summary, {"result_summary": result_summary}
+
+    from . import connector_tools
+
+    handled, c_ok, c_summary, c_data = await connector_tools.maybe_dispatch(ctx, tool, args)
+    if handled:
+        return c_ok, c_summary, c_data
 
     return False, f"unknown tool: {tool}", None
