@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { decideApproval, type AgentEvent } from "../lib/api";
 import { prettyJson, truncate } from "../lib/utils";
-import { CheckIcon, CodeIcon, GitPrIcon, WarningIcon, XIcon } from "./Icons";
+import { CheckIcon, ChevronIcon, CodeIcon, GitPrIcon, WarningIcon, XIcon } from "./Icons";
 import Spinner from "./Spinner";
 import AuthedImage from "./AuthedImage";
 import FilePreview from "./FilePreview";
@@ -35,6 +35,35 @@ function ToolCall({ tool, args }: { tool: string; args: unknown }) {
           {prettyJson(args)}
         </pre>
       </details>
+    </div>
+  );
+}
+
+function CompactToolRow({ tool, ok, summary }: { tool: string; ok: boolean; summary: string }) {
+  const [open, setOpen] = useState(false);
+  const firstLine = summary.split("\n").find((l) => l.trim()) || "";
+  return (
+    <div className="py-0.5">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center gap-2 py-1 text-left text-[11px] text-zinc-500 transition-colors active:text-zinc-300"
+      >
+        {ok ? (
+          <CheckIcon className="h-3 w-3 shrink-0 text-emerald-500/70" />
+        ) : (
+          <XIcon className="h-3 w-3 shrink-0 text-red-500/70" />
+        )}
+        <span className="shrink-0 font-mono">{tool}</span>
+        {firstLine ? <span className="min-w-0 flex-1 truncate">{firstLine}</span> : null}
+        <ChevronIcon
+          className={`h-3.5 w-3.5 shrink-0 transition-transform ${open ? "rotate-90" : ""}`}
+        />
+      </button>
+      {open && summary ? (
+        <pre className="mt-1 max-h-56 overflow-auto rounded-lg bg-black/50 p-2 text-[11px] leading-relaxed text-zinc-400">
+          {truncate(summary, 1500)}
+        </pre>
+      ) : null}
     </div>
   );
 }
@@ -78,19 +107,24 @@ function TerminalBlock({
   command,
   exitCode,
   output,
+  startCollapsed = false,
 }: {
   command: string;
   exitCode: number;
   output: string;
+  startCollapsed?: boolean;
 }) {
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(!startCollapsed);
   const lines = output.length ? output.split("\n") : [];
   const collapsible = lines.length > 10;
   const shown = collapsible && !expanded ? lines.slice(0, 10).join("\n") : output;
   const ok = exitCode === 0;
   return (
-    <div className="overflow-hidden rounded-xl border border-zinc-800 bg-black/70">
-      <div className="flex items-center gap-2 border-b border-zinc-800/80 bg-zinc-900/50 px-3 py-1.5">
+    <div className="overflow-hidden rounded-xl border border-zinc-800/80 bg-black/60">
+      <button
+        onClick={() => setExpanded((v) => !v)}
+        className="flex w-full items-center gap-2 border-b border-zinc-800/60 bg-zinc-900/40 px-3 py-1.5 text-left"
+      >
         <span className="font-mono text-[11px] text-zinc-500">$</span>
         <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-zinc-300">
           {command}
@@ -102,21 +136,14 @@ function TerminalBlock({
         >
           {exitCode}
         </span>
-      </div>
-      {output ? (
-        <>
-          <pre className="max-h-96 overflow-auto px-3 py-2 text-[11px] leading-relaxed text-zinc-400">
-            {shown}
-          </pre>
-          {collapsible ? (
-            <button
-              onClick={() => setExpanded((v) => !v)}
-              className="w-full border-t border-zinc-800/80 py-1.5 text-[11px] text-zinc-500 active:bg-zinc-900"
-            >
-              {expanded ? "collapse" : `expand (${lines.length} lines)`}
-            </button>
-          ) : null}
-        </>
+        <ChevronIcon
+          className={`h-3.5 w-3.5 shrink-0 text-zinc-600 transition-transform ${expanded ? "rotate-90" : ""}`}
+        />
+      </button>
+      {expanded && output ? (
+        <pre className="max-h-72 overflow-auto px-3 py-2 text-[11px] leading-relaxed text-zinc-400">
+          {shown}
+        </pre>
       ) : null}
     </div>
   );
@@ -238,6 +265,7 @@ function TaskCompleted({
   branch,
   iterations,
   tokensUsed,
+  compact = false,
 }: {
   resultSummary: string;
   prUrl: string;
@@ -245,7 +273,16 @@ function TaskCompleted({
   branch: string;
   iterations: number;
   tokensUsed: number;
+  compact?: boolean;
 }) {
+  if (compact && !prUrl) {
+    // Chat feed: the summary is the answer; skip the chrome unless there's a PR.
+    return resultSummary ? (
+      <div className="rounded-2xl rounded-tl-sm border border-zinc-800 border-l-2 border-l-emerald-600/70 bg-zinc-900/60 px-3.5 py-2.5">
+        <Markdown text={resultSummary} />
+      </div>
+    ) : null;
+  }
   return (
     <div className="rounded-xl border border-emerald-800/70 bg-emerald-950/25 px-3.5 py-3">
       <div className="flex items-center gap-2">
@@ -279,11 +316,18 @@ function TaskCompleted({
 
 export interface EventCardProps {
   event: AgentEvent;
+  /** Chat-feed mode: hides raw tool_call noise, collapses terminal output. */
+  compact?: boolean;
   decidedApprovals?: Record<string, "approved" | "denied">;
   onDecided?: () => void;
 }
 
-export default function EventCard({ event, decidedApprovals = {}, onDecided }: EventCardProps) {
+export default function EventCard({
+  event,
+  compact = false,
+  decidedApprovals = {},
+  onDecided,
+}: EventCardProps) {
   const p = event.payload || {};
   switch (event.type) {
     case "agent_delta":
@@ -291,8 +335,15 @@ export default function EventCard({ event, decidedApprovals = {}, onDecided }: E
     case "agent_message":
       return <AgentBubble content={str(p.content)} />;
     case "tool_call":
+      if (compact) return null;
       return <ToolCall tool={str(p.tool, "tool")} args={p.args ?? {}} />;
     case "tool_result":
+      if (compact) {
+        if (str(p.tool) === "bash" || str(p.tool) === "finish") return null;
+        return (
+          <CompactToolRow tool={str(p.tool, "tool")} ok={bool(p.ok)} summary={str(p.summary)} />
+        );
+      }
       return (
         <ToolResult
           tool={str(p.tool, "tool")}
@@ -307,6 +358,7 @@ export default function EventCard({ event, decidedApprovals = {}, onDecided }: E
           command={str(p.command)}
           exitCode={num(p.exit_code, -1)}
           output={str(p.output)}
+          startCollapsed={compact}
         />
       );
     case "screenshot":
@@ -353,6 +405,7 @@ export default function EventCard({ event, decidedApprovals = {}, onDecided }: E
           branch={str(p.branch)}
           iterations={num(p.iterations)}
           tokensUsed={num(p.tokens_used)}
+          compact={compact}
         />
       );
     case "task_failed":

@@ -20,7 +20,11 @@ class Settings(BaseSettings):
 
     AGENTROUTER_BASE_URL: Optional[str] = None
     AGENTROUTER_API_KEY: Optional[str] = None
-    AGENTROUTER_DEFAULT_MODEL: str = "gpt-4.1"
+    AGENTROUTER_DEFAULT_MODEL: str = "gemini-3.8-flash"
+
+    # Secondary OpenAI-compatible provider (routed by model name, e.g. deepseek-*).
+    BAI_BASE_URL: Optional[str] = "https://api.b.ai/v1"
+    BAI_API_KEY: Optional[str] = None
 
     E2B_API_KEY: Optional[str] = None
 

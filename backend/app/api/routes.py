@@ -13,7 +13,7 @@ from .. import connectors as connectors_mod
 from .. import sandbox as sbx_mod
 from ..db import SessionLocal, get_settings_data, save_settings
 from ..events import subscribe, unsubscribe
-from ..llm import LLMNotConfigured, llm
+from ..llm import LLMNotConfigured, any_configured, list_all_models
 from ..models import (
     Approval,
     Artifact,
@@ -191,7 +191,7 @@ async def create_task(project_id: str, body: TaskCreate):
             project_id=project_id,
             prompt=body.prompt,
             status="queued",
-            model=body.model or str(settings_data.get("default_model") or "gemini-2.5-flash"),
+            model=body.model or str(settings_data.get("default_model") or "gemini-3.8-flash"),
         )
         session.add(task)
         await session.commit()
@@ -530,10 +530,10 @@ async def put_settings(body: SettingsIn):
 
 @router.get("/api/models", response_model=ModelsOut)
 async def list_models():
-    if not llm.configured:
+    if not any_configured():
         return ModelsOut(models=[])
     try:
-        models = await llm.list_models()
+        models = await list_all_models()
     except LLMNotConfigured:
         return ModelsOut(models=[])
     except Exception as exc:

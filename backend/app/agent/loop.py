@@ -12,7 +12,14 @@ from .. import push
 from ..config import settings
 from ..db import SessionLocal, get_settings_data
 from ..events import append_event
-from ..llm import LLMError, LLMNotConfigured, llm
+from ..llm import (
+    LLMError,
+    LLMNotConfigured,
+    any_configured,
+    chat as llm_chat,
+    chat_stream as llm_chat_stream,
+    client_for,
+)
 from ..models import Approval, Message, Task, Project, new_id, utcnow
 from ..permissions import evaluate
 from .prompts import COMPACTION_PROMPT, GENERAL_SYSTEM_PROMPT, SYSTEM_PROMPT
@@ -147,9 +154,21 @@ def _wire_msg(msg: Dict[str, Any]) -> Dict[str, Any]:
 DELTA_FLUSH_CHARS = 90
 DELTA_FLUSH_SECONDS = 0.25
 
+# When the primary model is rate-limited (429) or unavailable, fail over in order.
+FALLBACK_MODELS = ("deepseek-v4.1-flash", "gemini-3.8-flash", "gemini-flash-latest")
+
+
+def _is_rate_limited(exc: Exception) -> bool:
+    text = str(exc)
+    return "429" in text or "RESOURCE_EXHAUSTED" in text
+
 
 async def _llm_stream(task_id: str, messages: List[Dict[str, Any]], tool_defs, model: str) -> Dict[str, Any]:
-    """Call the LLM with streaming, emitting throttled ``agent_delta`` events."""
+    """Call the LLM with streaming, emitting throttled ``agent_delta`` events.
+
+    Retries with the provider's suggested delay on quota errors, then fails
+    over to another model so the turn still completes quickly.
+    """
     pending: List[str] = []
     pending_len = 0
     last_flush = time.monotonic()
@@ -171,11 +190,32 @@ async def _llm_stream(task_id: str, messages: List[Dict[str, Any]], tool_defs, m
         if pending_len >= DELTA_FLUSH_CHARS or (time.monotonic() - last_flush) >= DELTA_FLUSH_SECONDS:
             await flush()
 
-    assistant = await llm.chat_stream(
-        [_wire_msg(m) for m in messages], tools=tool_defs, model=model, on_delta=on_delta
-    )
-    await flush()
-    return assistant
+    chain = [model] + [m for m in FALLBACK_MODELS if m != model]
+    last_exc: Exception | None = None
+    for i, candidate in enumerate(chain):
+        if not client_for(candidate).configured:
+            continue
+        try:
+            assistant = await llm_chat_stream(
+                [_wire_msg(m) for m in messages], tools=tool_defs, model=candidate, on_delta=on_delta
+            )
+            await flush()
+            return assistant
+        except LLMNotConfigured:
+            raise
+        except LLMError as exc:
+            last_exc = exc
+            if not _is_rate_limited(exc) or i >= len(chain) - 1:
+                raise
+            nxt = next((m for m in chain[i + 1:] if client_for(m).configured), None)
+            if nxt is None:
+                raise
+            await _emit(
+                task_id,
+                "error",
+                {"message": f"{candidate} is rate-limited; continuing with {nxt}"},
+            )
+    raise last_exc or LLMError("LLM request failed")
 
 
 # ── approvals ────────────────────────────────────────────
@@ -232,7 +272,7 @@ def _approval_description(tool: str, args: dict) -> str:
 # ── compaction ───────────────────────────────────────────
 
 
-async def _maybe_compact(task_id: str, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+async def _maybe_compact(task_id: str, messages: List[Dict[str, Any]], model: str) -> List[Dict[str, Any]]:
     total = sum(len(m.get("content") or "") for m in messages)
     if total <= MAX_CONTEXT_CHARS or len(messages) <= COMPACT_KEEP + 2:
         return messages
@@ -254,11 +294,12 @@ async def _maybe_compact(task_id: str, messages: List[Dict[str, Any]]) -> List[D
             content += " " + json.dumps(m["tool_calls"], default=str)
         transcript.append(f"[{role}] {content}")
     try:
-        summary_msg = await llm.chat(
+        summary_msg = await llm_chat(
             [
                 {"role": "system", "content": COMPACTION_PROMPT},
                 {"role": "user", "content": "\n\n".join(transcript)[:100_000]},
-            ]
+            ],
+            model=model,
         )
         summary = (summary_msg.get("content") or "").strip()
     except Exception as exc:
@@ -405,7 +446,7 @@ async def run_agent_loop(task_id: str, worker) -> None:
         return
 
     resume = task.status in ("running", "awaiting_approval")
-    model = task.model or str(settings_data.get("default_model") or "gemini-2.5-flash")
+    model = task.model or str(settings_data.get("default_model") or "gemini-3.8-flash")
     max_iterations = int(settings_data.get("max_iterations") or 50)
     token_budget = int(settings_data.get("token_budget") or 2000000)
     command_timeout_s = int(settings_data.get("command_timeout_s") or 600)
@@ -502,8 +543,8 @@ async def run_agent_loop(task_id: str, worker) -> None:
                 await _finish_stopped(task_id, "stopped via API")
                 return
 
-        if not llm.configured:
-            await _finish_failed(task_id, "AGENTROUTER_BASE_URL/AGENTROUTER_API_KEY not configured")
+        if not any_configured():
+            await _finish_failed(task_id, "no LLM provider configured (AGENTROUTER_API_KEY / BAI_API_KEY)")
             return
 
         # main iterations
@@ -564,6 +605,12 @@ async def run_agent_loop(task_id: str, worker) -> None:
                 await _emit(task_id, "agent_message", {"content": content})
 
             if not tool_calls:
+                if is_chat and content.strip():
+                    # The model answered directly — finish now instead of
+                    # burning another round-trip on a "call finish" nudge.
+                    finished = True
+                    result_summary = content.strip()
+                    break
                 if is_chat:
                     nudge_text = (
                         "If you have fully answered the user, call the finish tool now with your answer "
@@ -578,7 +625,7 @@ async def run_agent_loop(task_id: str, worker) -> None:
                 messages.append(nudge)
                 await _save_message(task_id, nudge)
                 await _checkpoint(task_id, iterations, tokens_used, sandbox_id, sbx)
-                messages = await _maybe_compact(task_id, messages)
+                messages = await _maybe_compact(task_id, messages, model)
                 continue
 
             # execute tool calls
@@ -596,7 +643,7 @@ async def run_agent_loop(task_id: str, worker) -> None:
                     break
 
             await _checkpoint(task_id, iterations, tokens_used, sandbox_id, sbx)
-            messages = await _maybe_compact(task_id, messages)
+            messages = await _maybe_compact(task_id, messages, model)
 
             if stop_event.is_set():
                 await _finish_stopped(task_id, "stopped via API")

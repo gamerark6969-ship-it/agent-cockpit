@@ -165,7 +165,7 @@ class Permissions(BaseModel):
 
 
 class SettingsOut(BaseModel):
-    default_model: str = "gemini-2.5-flash"
+    default_model: str = "gemini-3.8-flash"
     max_iterations: int = Field(default=50, ge=1)
     token_budget: int = Field(default=2000000, ge=1)
     command_timeout_s: int = Field(default=600, ge=1)
