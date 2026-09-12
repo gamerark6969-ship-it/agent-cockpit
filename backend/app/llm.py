@@ -369,8 +369,12 @@ GEMINI_MODEL_CATALOG = [
     "gemini-3.1-pro-preview",
 ]
 
+# The model new tasks use by default (deepseek on b.ai has been the most
+# reliable provider; Gemini free tier rate-limits aggressively).
+DEFAULT_TASK_MODEL = "deepseek-v4.1-flash"
+
 # Order matters: first entry is the UI default, the rest are failover targets.
-MODEL_CATALOG = ["gemini-3.8-flash", *BAI_MODELS, *GEMINI_MODEL_CATALOG[1:]]
+MODEL_CATALOG = [DEFAULT_TASK_MODEL, *GEMINI_MODEL_CATALOG]
 
 
 def client_for(model: Optional[str]) -> LLMClient:

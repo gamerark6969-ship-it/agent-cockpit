@@ -19,10 +19,10 @@ async def get_session():
 
 def _default_settings() -> dict:
     from .schemas import SettingsOut
+    from .llm import DEFAULT_TASK_MODEL
 
     data = SettingsOut().model_dump()
-    if settings.AGENTROUTER_DEFAULT_MODEL:
-        data["default_model"] = settings.AGENTROUTER_DEFAULT_MODEL
+    data["default_model"] = DEFAULT_TASK_MODEL
     return data
 
 

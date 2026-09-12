@@ -20,7 +20,7 @@ import Markdown from "../components/Markdown";
 import { SendIcon, StopIcon } from "../components/Icons";
 
 const TERMINAL: TaskStatus[] = ["done", "failed", "stopped"];
-const FALLBACK_MODELS = ["gemini-3.8-flash"];
+const FALLBACK_MODELS = ["deepseek-v4.1-flash"];
 
 const str = (v: unknown, fallback = ""): string => (typeof v === "string" ? v : fallback);
 

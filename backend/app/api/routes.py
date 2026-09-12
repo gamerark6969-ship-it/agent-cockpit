@@ -13,7 +13,7 @@ from .. import connectors as connectors_mod
 from .. import sandbox as sbx_mod
 from ..db import SessionLocal, get_settings_data, save_settings
 from ..events import subscribe, unsubscribe
-from ..llm import LLMNotConfigured, any_configured, list_all_models
+from ..llm import DEFAULT_TASK_MODEL, LLMNotConfigured, any_configured, list_all_models
 from ..models import (
     Approval,
     Artifact,
@@ -191,7 +191,7 @@ async def create_task(project_id: str, body: TaskCreate):
             project_id=project_id,
             prompt=body.prompt,
             status="queued",
-            model=body.model or str(settings_data.get("default_model") or "gemini-3.8-flash"),
+            model=body.model or str(settings_data.get("default_model") or DEFAULT_TASK_MODEL),
         )
         session.add(task)
         await session.commit()

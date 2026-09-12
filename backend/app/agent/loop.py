@@ -13,6 +13,7 @@ from ..config import settings
 from ..db import SessionLocal, get_settings_data
 from ..events import append_event
 from ..llm import (
+    DEFAULT_TASK_MODEL,
     LLMError,
     LLMNotConfigured,
     any_configured,
@@ -156,7 +157,16 @@ DELTA_FLUSH_CHARS = 90
 DELTA_FLUSH_SECONDS = 0.25
 
 # When the primary model is rate-limited (429) or unavailable, fail over in order.
-FALLBACK_MODELS = ("deepseek-v4.1-flash", "gemini-3.8-flash", "gemini-flash-latest")
+FALLBACK_MODELS = ("gemini-3.8-flash", "gemini-flash-latest")
+
+# Models that just returned a quota error are skipped for this long, so the
+# chain does not ping-pong between two rate-limited providers.
+_MODEL_COOLDOWN_S = 120.0
+_model_cooldown: Dict[str, float] = {}
+
+
+def _in_cooldown(model: str) -> bool:
+    return _model_cooldown.get(model, 0.0) > time.monotonic()
 
 
 # How many times we wait out a quota window on the same model when no
@@ -249,6 +259,9 @@ async def _llm_stream(task_id: str, messages: List[Dict[str, Any]], tool_defs, m
             await flush()
 
     chain = [model] + [m for m in FALLBACK_MODELS if m != model]
+    fresh = [m for m in chain if not _in_cooldown(m)]
+    if fresh:
+        chain = fresh
     last_exc: Exception | None = None
     for i, candidate in enumerate(chain):
         if not client_for(candidate).configured:
@@ -270,6 +283,7 @@ async def _llm_stream(task_id: str, messages: List[Dict[str, Any]], tool_defs, m
                 last_exc = exc
                 if not _is_transient_llm_error(exc):
                     raise
+                _model_cooldown[candidate] = time.monotonic() + _MODEL_COOLDOWN_S
                 if attempt < attempts - 1:
                     delay = retry_delay_from_error(str(exc)) or 45.0
                     await asyncio.sleep(min(delay + 1.0, 90.0))
@@ -511,7 +525,7 @@ async def run_agent_loop(task_id: str, worker) -> None:
         return
 
     resume = task.status in ("running", "awaiting_approval")
-    model = task.model or str(settings_data.get("default_model") or "gemini-3.8-flash")
+    model = task.model or str(settings_data.get("default_model") or DEFAULT_TASK_MODEL)
     max_iterations = int(settings_data.get("max_iterations") or 50)
     token_budget = int(settings_data.get("token_budget") or 2000000)
     command_timeout_s = int(settings_data.get("command_timeout_s") or 600)
