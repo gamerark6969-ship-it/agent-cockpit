@@ -180,15 +180,52 @@ def _is_transient_llm_error(exc: Exception) -> bool:
     return any(marker in text for marker in _TRANSIENT_LLM_MARKERS)
 
 
+def _wire_messages_for_model(messages: List[Dict[str, Any]], model: str) -> List[Dict[str, Any]]:
+    """Adapt conversation history for the target model.
+
+    Gemini 3 rejects history containing function calls without a
+    thought_signature — which is every call made by a different provider.
+    When switching models mid-task, rewrite that tool traffic as plain text so
+    the conversation stays usable. Signed (Gemini-native) calls pass through.
+    """
+    if not model.startswith(("gemini-3", "gemini-flash-latest", "gemini-pro-latest")):
+        return messages
+
+    def _signed(tc: dict) -> bool:
+        google = (tc.get("extra_content") or {}).get("google") or {}
+        return bool(google.get("thought_signature"))
+
+    if all(_signed(tc) for m in messages for tc in (m.get("tool_calls") or [])):
+        return messages
+
+    out: List[Dict[str, Any]] = []
+    for m in messages:
+        if m.get("tool_calls"):
+            calls = "; ".join(
+                "{}({})".format(
+                    (tc.get("function") or {}).get("name", "tool"),
+                    str((tc.get("function") or {}).get("arguments") or "")[:400],
+                )
+                for tc in m["tool_calls"]
+            )
+            content = (m.get("content") or "").strip()
+            text = f"{content}\n[used tools: {calls}]".strip()
+            out.append({"role": "assistant", "content": text})
+        elif m.get("role") == "tool" or m.get("tool_call_id"):
+            out.append({"role": "user", "content": f"[tool result] {(m.get('content') or '')[:4000]}"})
+        else:
+            out.append(m)
+    return out
+
+
 async def _llm_stream(task_id: str, messages: List[Dict[str, Any]], tool_defs, model: str) -> tuple:
     """Call the LLM with streaming, emitting throttled ``agent_delta`` events.
 
-    Quota policy: while the conversation has no tool calls yet, a 429 fails
-    over instantly to another model. Once tool calls exist we stay on the same
-    model and wait out the quota window — Gemini 3 rejects history containing
-    function calls that were made (unsigned) by a different model, so
-    switching providers mid-task would corrupt the conversation. Returns
-    (assistant_message, model_that_answered).
+    Quota policy: a transient error (429/503) on the task's model first waits
+    out the provider's suggested delay a few times; if it persists, fail over
+    to another model. History containing tool calls made by a different
+    provider is rewritten to plain text so Gemini 3 accepts it (see
+    _wire_messages_for_model). Returns (assistant_message, model_that_answered).
     """
     pending: List[str] = []
     pending_len = 0
@@ -211,11 +248,7 @@ async def _llm_stream(task_id: str, messages: List[Dict[str, Any]], tool_defs, m
         if pending_len >= DELTA_FLUSH_CHARS or (time.monotonic() - last_flush) >= DELTA_FLUSH_SECONDS:
             await flush()
 
-    has_tool_history = any(m.get("tool_calls") for m in messages)
-    chain = [model]
-    if not has_tool_history:
-        chain += [m for m in FALLBACK_MODELS if m != model]
-
+    chain = [model] + [m for m in FALLBACK_MODELS if m != model]
     last_exc: Exception | None = None
     for i, candidate in enumerate(chain):
         if not client_for(candidate).configured:
@@ -224,7 +257,7 @@ async def _llm_stream(task_id: str, messages: List[Dict[str, Any]], tool_defs, m
         for attempt in range(attempts):
             try:
                 assistant = await llm_chat_stream(
-                    [_wire_msg(m) for m in messages],
+                    [_wire_msg(m) for m in _wire_messages_for_model(messages, candidate)],
                     tools=tool_defs,
                     model=candidate,
                     on_delta=on_delta,
