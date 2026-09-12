@@ -156,8 +156,10 @@ def _wire_msg(msg: Dict[str, Any]) -> Dict[str, Any]:
 DELTA_FLUSH_CHARS = 90
 DELTA_FLUSH_SECONDS = 0.25
 
-# When the primary model is rate-limited (429) or unavailable, fail over in order.
-FALLBACK_MODELS = ("gemini-3.8-flash", "gemini-flash-latest")
+# When the primary model is rate-limited (429) or unavailable, fail over in
+# order. gemini-flash-latest is deliberately absent — it is an alias of
+# gemini-3.8-flash and shares its quota.
+FALLBACK_MODELS = ("deepseek-v4.1-flash", "gemini-3.8-flash")
 
 # Models that just returned a quota error are skipped for this long, so the
 # chain does not ping-pong between two rate-limited providers.
