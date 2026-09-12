@@ -1,5 +1,7 @@
 import asyncio
-from typing import Any, Dict, List, Optional
+import json
+import uuid
+from typing import Any, Callable, Dict, List, Optional
 
 import httpx
 
@@ -137,6 +139,139 @@ class LLMClient:
             "total_tokens": total_tokens or (prompt_tokens + completion_tokens),
         }
         return message
+
+    async def chat_stream(
+        self,
+        messages: List[Dict[str, Any]],
+        tools: Optional[List[Dict[str, Any]]] = None,
+        model: Optional[str] = None,
+        max_tokens: Optional[int] = None,
+        on_delta: Optional[Callable[[str], Any]] = None,
+    ) -> Dict[str, Any]:
+        """Stream a chat completion, invoking ``on_delta(text)`` per content chunk.
+
+        Returns the same assistant message shape as :meth:`chat` (content /
+        tool_calls) plus accumulated ``_usage``. Falls back to a non-streaming
+        request if the provider ignores ``stream=True``.
+        """
+        if not self.configured:
+            raise LLMNotConfigured("AGENTROUTER_BASE_URL/AGENTROUTER_API_KEY not configured")
+        body: Dict[str, Any] = {
+            "model": model or self.model,
+            "messages": messages,
+            "stream": True,
+            "stream_options": {"include_usage": True},
+        }
+        if tools:
+            body["tools"] = tools
+            body["tool_choice"] = "auto"
+        if max_tokens:
+            body["max_tokens"] = max_tokens
+        url = f"{self.base_url}/chat/completions"
+
+        client = await self._acquire()
+        last_exc: Exception | None = None
+        for attempt in range(5):
+            content_parts: List[str] = []
+            tool_acc: Dict[int, Dict[str, Any]] = {}
+            usage: Dict[str, Any] = {}
+            got_any = False
+            try:
+                async with client.stream("POST", url, headers=self._headers(), json=body) as resp:
+                    if resp.status_code == 429 or resp.status_code >= 500:
+                        raw = await resp.aread()
+                        last_exc = LLMError(
+                            f"LLM HTTP {resp.status_code}: {raw[:500].decode('utf-8', 'replace')}"
+                        )
+                        await asyncio.sleep(min(2**attempt, 30))
+                        continue
+                    if resp.status_code >= 400:
+                        raw = await resp.aread()
+                        raise LLMError(
+                            f"LLM HTTP {resp.status_code}: {raw[:500].decode('utf-8', 'replace')}"
+                        )
+                    async for line in resp.aiter_lines():
+                        if not line or not line.startswith("data:"):
+                            continue
+                        data = line[5:].strip()
+                        if data == "[DONE]":
+                            break
+                        try:
+                            chunk = json.loads(data)
+                        except (ValueError, TypeError):
+                            continue
+                        if chunk.get("usage"):
+                            usage = chunk["usage"]
+                        for choice in chunk.get("choices") or []:
+                            delta = choice.get("delta") or {}
+                            piece = delta.get("content")
+                            if piece:
+                                got_any = True
+                                content_parts.append(piece)
+                                if on_delta is not None:
+                                    await on_delta(piece)
+                            for tcd in delta.get("tool_calls") or []:
+                                got_any = True
+                                idx = int(tcd.get("index") or 0)
+                                slot = tool_acc.setdefault(
+                                    idx,
+                                    {
+                                        "id": "",
+                                        "type": "function",
+                                        "function": {"name": "", "arguments": ""},
+                                    },
+                                )
+                                if tcd.get("id"):
+                                    slot["id"] = tcd["id"]
+                                fn = tcd.get("function") or {}
+                                if fn.get("name"):
+                                    slot["function"]["name"] += fn["name"]
+                                if fn.get("arguments"):
+                                    slot["function"]["arguments"] += fn["arguments"]
+
+                if not got_any:
+                    # Provider ignored stream=True (or returned nothing streamable).
+                    return await self.chat(
+                        messages, tools=tools, model=model, max_tokens=max_tokens
+                    )
+
+                calls: List[Dict[str, Any]] = []
+                for i in sorted(tool_acc):
+                    call = tool_acc[i]
+                    fn = call.get("function") or {}
+                    if not fn.get("name"):
+                        continue
+                    if not call.get("id"):
+                        call["id"] = f"call_{uuid.uuid4().hex}"
+                    call["type"] = "function"
+                    calls.append(call)
+
+                prompt_tokens = int(usage.get("prompt_tokens", 0) or 0)
+                completion_tokens = int(usage.get("completion_tokens", 0) or 0)
+                total_tokens = int(usage.get("total_tokens", prompt_tokens + completion_tokens) or 0)
+                message: Dict[str, Any] = {
+                    "content": "".join(content_parts) or None,
+                    "tool_calls": calls,
+                }
+                message["_usage"] = {
+                    "prompt_tokens": prompt_tokens,
+                    "completion_tokens": completion_tokens,
+                    "total_tokens": total_tokens or (prompt_tokens + completion_tokens),
+                }
+                return message
+            except httpx.TimeoutException as exc:
+                last_exc = LLMError(f"LLM timeout: {exc}")
+                if not got_any:
+                    await asyncio.sleep(min(2**attempt, 30))
+                    continue
+                raise last_exc
+            except httpx.HTTPError as exc:
+                last_exc = LLMError(f"LLM transport error: {exc}")
+                if not got_any:
+                    await asyncio.sleep(min(2**attempt, 30))
+                    continue
+                raise last_exc
+        raise last_exc or LLMError("LLM stream request failed")
 
     async def list_models(self) -> List[str]:
         if not self.configured:

@@ -4,6 +4,8 @@ import { prettyJson, truncate } from "../lib/utils";
 import { CheckIcon, CodeIcon, GitPrIcon, WarningIcon, XIcon } from "./Icons";
 import Spinner from "./Spinner";
 import AuthedImage from "./AuthedImage";
+import FilePreview from "./FilePreview";
+import Markdown from "./Markdown";
 
 const str = (v: unknown, fallback = ""): string => (typeof v === "string" ? v : fallback);
 const num = (v: unknown, fallback = 0): number => (typeof v === "number" ? v : fallback);
@@ -13,7 +15,7 @@ function AgentBubble({ content }: { content: string }) {
   if (!content.trim()) return null;
   return (
     <div className="rounded-2xl rounded-tl-sm border border-zinc-800 border-l-2 border-l-emerald-600/70 bg-zinc-900/60 px-3.5 py-2.5">
-      <p className="whitespace-pre-wrap text-sm leading-relaxed text-zinc-200">{content}</p>
+      <Markdown text={content} />
     </div>
   );
 }
@@ -284,6 +286,8 @@ export interface EventCardProps {
 export default function EventCard({ event, decidedApprovals = {}, onDecided }: EventCardProps) {
   const p = event.payload || {};
   switch (event.type) {
+    case "agent_delta":
+      return null;
     case "agent_message":
       return <AgentBubble content={str(p.content)} />;
     case "tool_call":
@@ -310,6 +314,15 @@ export default function EventCard({ event, decidedApprovals = {}, onDecided }: E
         <ScreenshotBlock
           artifactId={str(p.artifact_id)}
           filename={str(p.filename, "screenshot.png")}
+        />
+      );
+    case "file":
+      return (
+        <FilePreview
+          artifactId={str(p.artifact_id)}
+          filename={str(p.filename, "file")}
+          mime={str(p.mime)}
+          title={str(p.title)}
         />
       );
     case "approval_request":

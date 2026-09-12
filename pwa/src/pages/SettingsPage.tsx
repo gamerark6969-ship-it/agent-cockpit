@@ -132,16 +132,19 @@ export default function SettingsPage() {
   }
 
   return (
-    <div className="safe-top flex flex-col gap-4 px-4 pt-4 pb-8">
-      <h1 className="text-xl font-bold text-zinc-100">Settings</h1>
+    <div className="safe-top flex flex-col gap-4 px-4 pb-nav pt-5">
+      <header>
+        <h1 className="text-2xl font-bold tracking-tight text-zinc-50">Settings</h1>
+        <p className="mt-0.5 text-xs text-zinc-500">Models, permissions, and notifications</p>
+      </header>
 
       {message ? (
-        <p className="rounded-lg border border-emerald-900/60 bg-emerald-950/20 px-3 py-2 text-xs text-emerald-300">
+        <p className="animate-fade-in rounded-2xl border border-emerald-900/60 bg-emerald-950/20 px-4 py-2.5 text-xs text-emerald-300">
           {message}
         </p>
       ) : null}
       {error ? (
-        <p className="rounded-lg border border-red-900/60 bg-red-950/20 px-3 py-2 text-xs text-red-300">
+        <p className="animate-fade-in rounded-2xl border border-red-900/60 bg-red-950/20 px-4 py-2.5 text-xs text-red-300">
           {error}
         </p>
       ) : null}

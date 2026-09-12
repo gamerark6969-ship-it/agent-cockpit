@@ -9,6 +9,7 @@ from sqlalchemy import delete, func, select
 from .. import sandbox as sbx_mod
 from .. import compute
 from .. import push
+from ..config import settings
 from ..db import SessionLocal, get_settings_data
 from ..events import append_event
 from ..llm import LLMError, LLMNotConfigured, llm
@@ -141,8 +142,43 @@ def _wire_msg(msg: Dict[str, Any]) -> Dict[str, Any]:
     return out
 
 
-# ── approvals ────────────────────────────────────────────
+# ── streaming LLM turn ───────────────────────────────────
 
+DELTA_FLUSH_CHARS = 90
+DELTA_FLUSH_SECONDS = 0.25
+
+
+async def _llm_stream(task_id: str, messages: List[Dict[str, Any]], tool_defs, model: str) -> Dict[str, Any]:
+    """Call the LLM with streaming, emitting throttled ``agent_delta`` events."""
+    pending: List[str] = []
+    pending_len = 0
+    last_flush = time.monotonic()
+
+    async def flush() -> None:
+        nonlocal pending, pending_len, last_flush
+        if not pending:
+            return
+        text = "".join(pending)
+        pending = []
+        pending_len = 0
+        last_flush = time.monotonic()
+        await _emit(task_id, "agent_delta", {"content": text})
+
+    async def on_delta(piece: str) -> None:
+        nonlocal pending_len
+        pending.append(piece)
+        pending_len += len(piece)
+        if pending_len >= DELTA_FLUSH_CHARS or (time.monotonic() - last_flush) >= DELTA_FLUSH_SECONDS:
+            await flush()
+
+    assistant = await llm.chat_stream(
+        [_wire_msg(m) for m in messages], tools=tool_defs, model=model, on_delta=on_delta
+    )
+    await flush()
+    return assistant
+
+
+# ── approvals ────────────────────────────────────────────
 
 async def _wait_for_approval(worker, approval_id: str, timeout_s: int, stop_event: asyncio.Event) -> str:
     """Returns 'approve' | 'deny' | 'timeout' | 'stopped'."""
@@ -275,6 +311,25 @@ async def _setup_sandbox(task: Task, project: Project, resume: bool) -> Tuple[Op
     return sbx, reset_note
 
 
+async def _latest_thread_sandbox_id(project_id: str, exclude_task_id: str) -> Optional[str]:
+    """For chat threads: reuse the most recent turn's sandbox so files persist across turns."""
+    async with SessionLocal() as session:
+        row = (
+            await session.execute(
+                select(Task.sandbox_id)
+                .where(
+                    Task.project_id == project_id,
+                    Task.id != exclude_task_id,
+                    Task.sandbox_id.is_not(None),
+                    Task.sandbox_id != "",
+                )
+                .order_by(Task.created_at.desc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+    return row or None
+
+
 async def _ensure_branch(sbx, short_id: str) -> None:
     branch = f"agent/{short_id}"
     cmd = (
@@ -371,9 +426,12 @@ async def run_agent_loop(task_id: str, worker) -> None:
     branch = None
     sandbox_id = ""
     if is_chat:
-        if resume and task.sandbox_id:
+        reuse_id = task.sandbox_id if (resume and task.sandbox_id) else None
+        if not reuse_id:
+            reuse_id = await _latest_thread_sandbox_id(project.id, task_id)
+        if reuse_id:
             try:
-                sbx = await sbx_mod.connect(task.sandbox_id)
+                sbx = await sbx_mod.connect(reuse_id)
             except sbx_mod.SandboxError:
                 sbx = None
     else:
@@ -477,11 +535,9 @@ async def run_agent_loop(task_id: str, worker) -> None:
                 messages.append(note)
                 await _save_message(task_id, note)
 
-            # LLM call
+            # LLM call (streamed so the user sees the response as it is written)
             try:
-                assistant = await llm.chat(
-                    [_wire_msg(m) for m in messages], tools=tool_defs, model=model
-                )
+                assistant = await _llm_stream(task_id, messages, tool_defs, model)
             except LLMNotConfigured:
                 await _finish_failed(task_id, "AGENTROUTER_BASE_URL/AGENTROUTER_API_KEY not configured")
                 return
@@ -560,7 +616,7 @@ async def run_agent_loop(task_id: str, worker) -> None:
         await _finish_failed(task_id, f"internal error: {type(exc).__name__}: {exc}")
     finally:
         active_sbx = ctx.sandbox if ctx is not None else sbx
-        await _release_sandbox_after_terminal(task_id, active_sbx)
+        await _release_sandbox_after_terminal(task_id, active_sbx, is_chat)
 
 
 # Once a task reaches a terminal state the sandbox is no longer needed for work.
@@ -569,13 +625,14 @@ async def run_agent_loop(task_id: str, worker) -> None:
 TERMINAL_SANDBOX_GRACE_S = 900
 
 
-async def _release_sandbox_after_terminal(task_id: str, sbx) -> None:
+async def _release_sandbox_after_terminal(task_id: str, sbx, is_chat: bool = False) -> None:
     if sbx is None:
         return
     try:
         current = await _get_task(task_id)
         if current and current.status in ("done", "failed", "stopped"):
-            await sbx_mod.keep_alive(sbx, seconds=TERMINAL_SANDBOX_GRACE_S)
+            grace = settings.SANDBOX_TIMEOUT_S if is_chat else TERMINAL_SANDBOX_GRACE_S
+            await sbx_mod.keep_alive(sbx, seconds=grace)
     except Exception:
         log.debug("sandbox release after terminal failed for %s", task_id, exc_info=True)
 

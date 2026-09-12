@@ -39,6 +39,9 @@ class Settings(BaseSettings):
     DEFAULT_COMMAND_TIMEOUT_S: int = 600
     DEFAULT_APPROVAL_TIMEOUT_S: int = 1800
 
+    # How many tasks the background worker runs at once.
+    WORKER_CONCURRENCY: int = 3
+
     # Sandbox lifetime (seconds); extended on every agent iteration via keep_alive().
     SANDBOX_TIMEOUT_S: int = 3600
 

@@ -139,30 +139,37 @@ export default function Connectors() {
   };
 
   return (
-    <div className="safe-top px-4 pt-4">
-      <div className="mb-4 flex items-center gap-2">
-        <PlugIcon className="h-5 w-5 text-emerald-400" />
-        <h1 className="text-xl font-bold text-zinc-100">Connectors</h1>
-      </div>
+    <div className="safe-top px-4 pb-nav pt-5">
+      <header className="mb-5">
+        <div className="flex items-center gap-2">
+          <PlugIcon className="h-5 w-5 text-emerald-400" />
+          <h1 className="text-2xl font-bold tracking-tight text-zinc-50">Connectors</h1>
+        </div>
+        <p className="mt-0.5 text-xs text-zinc-500">Give the agent access to your tools</p>
+      </header>
 
       {error ? (
-        <p className="mb-3 rounded-lg border border-red-900/60 bg-red-950/20 px-3 py-2 text-xs text-red-300">
+        <p className="animate-fade-in mb-3 rounded-2xl border border-red-900/60 bg-red-950/20 px-4 py-2.5 text-xs text-red-300">
           {error}
         </p>
       ) : null}
 
       {loading ? (
-        <div className="flex justify-center py-12 text-zinc-500">
+        <div className="flex justify-center py-16 text-zinc-500">
           <Spinner />
         </div>
       ) : (
         <div className="flex flex-col gap-2.5">
-          {CATALOG.map((item) => {
+          {CATALOG.map((item, i) => {
             const c = byKind(item.kind);
             const isEditing = editing === item.kind;
             const hasFields = item.fields.length > 0;
             return (
-              <div key={item.kind} className={card}>
+              <div
+                key={item.kind}
+                className={`${card} animate-rise`}
+                style={{ animationDelay: `${Math.min(i, 8) * 30}ms` }}
+              >
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">

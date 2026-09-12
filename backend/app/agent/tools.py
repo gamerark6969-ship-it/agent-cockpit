@@ -226,6 +226,21 @@ TOOL_DEFINITIONS: List[dict] = [
     {
         "type": "function",
         "function": {
+            "name": "preview_file",
+            "description": "Publish a file you created in the sandbox so the user can preview it inline in the app. Use this for any HTML page, image, PDF, document, or source/text file the user should see. HTML renders live. Call this before finishing whenever you built or changed a file the user would want to see.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "File path, relative to your working directory or absolute"},
+                    "title": {"type": "string", "description": "Optional human-friendly title to show in the app"},
+                },
+                "required": ["path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "finish",
             "description": "Signal that the task is complete. Provide a concise result summary (mention the PR URL if created).",
             "parameters": {
@@ -306,6 +321,38 @@ def _repo_path(path: str, ctx: "ToolContext") -> str:
     if path.startswith("/") or path.startswith("~"):
         return path
     return f"{base}/{path}"
+
+
+MAX_PREVIEW_BYTES = 8 * 1024 * 1024
+
+_MIME_BY_EXT = {
+    ".html": "text/html",
+    ".htm": "text/html",
+    ".css": "text/css",
+    ".js": "text/javascript",
+    ".mjs": "text/javascript",
+    ".json": "application/json",
+    ".svg": "image/svg+xml",
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".gif": "image/gif",
+    ".webp": "image/webp",
+    ".pdf": "application/pdf",
+    ".txt": "text/plain",
+    ".md": "text/markdown",
+    ".csv": "text/csv",
+}
+
+
+def guess_mime(filename: str) -> str:
+    name = (filename or "").lower()
+    if "." in name:
+        ext = name[name.rfind(".") :]
+        mime = _MIME_BY_EXT.get(ext)
+        if mime:
+            return mime
+    return "application/octet-stream"
 
 
 _TAG_RE = re.compile(r"<[^>]+>")
@@ -652,6 +699,60 @@ async def _dispatch(ctx: ToolContext, tool: str, args: dict) -> Tuple[bool, str,
             },
         )
         return True, f"screenshot saved ({len(data_bytes)} bytes)", {"artifact_id": artifact_id}
+
+    if tool == "preview_file":
+        sbx = await ctx.ensure_sandbox()
+        raw_path = str(args.get("path", "") or "").strip()
+        if not raw_path:
+            return False, "path is required", None
+        path = _repo_path(raw_path, ctx)
+        try:
+            data = await sbx.files.read(path, format="bytes")
+        except Exception as exc:
+            return False, f"cannot read {path}: {exc}", None
+        if data is None:
+            return False, f"file not found: {path}", None
+        if isinstance(data, str):
+            data = data.encode("utf-8")
+        if not isinstance(data, bytes):
+            return False, f"unexpected file data for {path}", None
+        if not data:
+            return False, f"file is empty: {path}", None
+        if len(data) > MAX_PREVIEW_BYTES:
+            return False, f"file too large to preview ({len(data)} bytes, max {MAX_PREVIEW_BYTES})", None
+        filename = path.rsplit("/", 1)[-1] or "file"
+        mime = guess_mime(filename)
+        title = str(args.get("title") or "").strip() or filename
+        artifact_id = new_id()
+        async with SessionLocal() as session:
+            artifact = Artifact(
+                id=artifact_id,
+                task_id=ctx.task_id,
+                kind="file",
+                filename=filename,
+                mime=mime,
+                size=len(data),
+                data=data,
+                created_at=datetime.now(timezone.utc),
+            )
+            session.add(artifact)
+            await session.commit()
+        await _emit(
+            ctx.task_id,
+            "file",
+            {
+                "artifact_id": artifact_id,
+                "filename": filename,
+                "mime": mime,
+                "title": title,
+                "url": f"/api/artifacts/{artifact_id}",
+            },
+        )
+        return (
+            True,
+            f"preview published: {filename} ({mime}, {len(data)} bytes)",
+            {"artifact_id": artifact_id, "filename": filename, "mime": mime, "title": title},
+        )
 
     if tool == "finish":
         result_summary = str(args.get("result_summary", "") or "task finished")

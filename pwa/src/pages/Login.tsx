@@ -20,24 +20,24 @@ export default function Login() {
   };
 
   return (
-    <div className="safe-top flex min-h-dvh flex-col justify-center px-6">
+    <div className="safe-top safe-bottom flex min-h-dvh flex-col justify-center px-6">
       <div className="mb-8">
-        <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-emerald-600 text-2xl font-black text-white">
+        <div className="mb-5 flex h-16 w-16 items-center justify-center rounded-3xl bg-gradient-to-b from-emerald-400 to-emerald-600 text-2xl font-black text-white shadow-2xl shadow-emerald-900/50">
           AC
         </div>
-        <h1 className="text-2xl font-bold text-zinc-100">Agent Cockpit</h1>
-        <p className="mt-1 text-sm text-zinc-500">
+        <h1 className="text-3xl font-bold tracking-tight text-zinc-50">Agent Cockpit</h1>
+        <p className="mt-1.5 text-sm text-zinc-500">
           Control an autonomous software engineer from your phone.
         </p>
       </div>
 
       {existing ? (
-        <div className="mb-6 rounded-xl border border-emerald-900/60 bg-emerald-950/20 px-3 py-2.5">
+        <div className="mb-6 rounded-2xl border border-emerald-900/60 bg-emerald-950/20 px-4 py-3">
           <p className="text-xs text-emerald-300">A token is already saved on this device.</p>
         </div>
       ) : null}
 
-      <label className="mb-1.5 block text-xs font-medium uppercase tracking-wide text-zinc-500">
+      <label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
         Access token
       </label>
       <input
@@ -67,7 +67,7 @@ export default function Login() {
               Continue with saved token
             </button>
             <button
-              className="py-2 text-xs text-zinc-500"
+              className="py-2 text-xs text-zinc-500 transition-colors active:text-zinc-300"
               onClick={() => {
                 clearToken();
                 setValue("");

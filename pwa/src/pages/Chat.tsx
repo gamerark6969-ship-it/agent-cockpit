@@ -13,15 +13,17 @@ import {
   type Task,
   type TaskStatus,
 } from "../lib/api";
-import { streamTaskEvents, type StreamHandle, type StreamStatus } from "../lib/sse";
+import { streamTaskEvents, type StreamHandle } from "../lib/sse";
 import EventCard from "../components/EventCard";
 import Spinner from "../components/Spinner";
-import StatusBadge from "../components/StatusBadge";
+import Markdown from "../components/Markdown";
 import { ChatIcon, SendIcon, StopIcon } from "../components/Icons";
 import { inputBase, textareaBase } from "../lib/ui";
 
 const TERMINAL: TaskStatus[] = ["done", "failed", "stopped"];
 const FALLBACK_MODELS = ["gemini-2.5-flash", "gemini-2.5-pro"];
+
+const str = (v: unknown, fallback = ""): string => (typeof v === "string" ? v : fallback);
 
 function UserBubble({ text }: { text: string }) {
   return (
@@ -37,58 +39,148 @@ function AssistantBubble({ text }: { text: string }) {
   if (!text.trim()) return null;
   return (
     <div className="rounded-2xl rounded-tl-sm border border-zinc-800 border-l-2 border-l-emerald-600/70 bg-zinc-900/60 px-3.5 py-2.5">
-      <p className="whitespace-pre-wrap text-sm leading-relaxed text-zinc-200">{text}</p>
+      <Markdown text={text} />
     </div>
   );
+}
+
+function StreamingBubble({ text }: { text: string }) {
+  return (
+    <div className="rounded-2xl rounded-tl-sm border border-zinc-800 border-l-2 border-l-emerald-600/70 bg-zinc-900/60 px-3.5 py-2.5">
+      <Markdown text={text} />
+      <span className="ml-0.5 inline-block h-4 w-1.5 translate-y-0.5 animate-pulse rounded-sm bg-emerald-400" />
+    </div>
+  );
+}
+
+function statusLabel(status: TaskStatus): string {
+  switch (status) {
+    case "queued":
+      return "Queued…";
+    case "running":
+      return "Working…";
+    case "awaiting_approval":
+      return "Waiting for approval…";
+    default:
+      return "";
+  }
 }
 
 export default function Chat() {
   const { id = "" } = useParams();
   const [project, setProject] = useState<Project | null>(null);
   const [tasks, setTasks] = useState<Task[]>([]);
-  const [events, setEvents] = useState<AgentEvent[]>([]);
-  const [liveTaskId, setLiveTaskId] = useState<string | null>(null);
+  const [eventsByTask, setEventsByTask] = useState<Record<string, AgentEvent[]>>({});
   const [models, setModels] = useState<string[]>([]);
   const [model, setModel] = useState("");
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const [streamStatus, setStreamStatus] = useState<StreamStatus>("closed");
 
-  const seen = useRef<Set<number>>(new Set());
-  const handleRef = useRef<StreamHandle | null>(null);
+  const handles = useRef<Map<string, StreamHandle>>(new Map());
   const feedRef = useRef<HTMLDivElement | null>(null);
   const stick = useRef(true);
 
-  const closeStream = () => {
-    handleRef.current?.close();
-    handleRef.current = null;
-    setStreamStatus("closed");
+  const mergeEvents = (taskId: string, incoming: AgentEvent[]) => {
+    if (!incoming.length) return;
+    setEventsByTask((prev) => {
+      const existing = prev[taskId] ?? [];
+      const seen = new Set(existing.map((e) => e.seq));
+      const fresh = incoming.filter((e) => !seen.has(e.seq));
+      if (!fresh.length) return prev;
+      return { ...prev, [taskId]: [...existing, ...fresh].sort((a, b) => a.seq - b.seq) };
+    });
   };
 
-  const loadTasks = async () => {
+  const closeStream = (taskId: string) => {
+    const h = handles.current.get(taskId);
+    if (h) {
+      h.close();
+      handles.current.delete(taskId);
+    }
+  };
+
+  const closeAll = () => {
+    handles.current.forEach((h) => h.close());
+    handles.current.clear();
+  };
+
+  const applyTerminalEvent = (e: AgentEvent) => {
+    if (e.type !== "task_completed" && e.type !== "task_failed" && e.type !== "task_stopped") return;
+    closeStream(e.task_id);
+    const status: TaskStatus =
+      e.type === "task_completed" ? "done" : e.type === "task_failed" ? "failed" : "stopped";
+    setTasks((prev) =>
+      prev.map((t) =>
+        t.id === e.task_id
+          ? {
+              ...t,
+              status,
+              result_summary:
+                e.type === "task_completed"
+                  ? String(e.payload.result_summary ?? t.result_summary ?? "")
+                  : t.result_summary,
+              error: e.type === "task_failed" ? String(e.payload.error ?? "") : t.error,
+            }
+          : t,
+      ),
+    );
+  };
+
+  const openStream = (task: Task) => {
+    if (handles.current.has(task.id) || TERMINAL.includes(task.status)) return;
+    const placeholder: StreamHandle = { close: () => undefined };
+    handles.current.set(task.id, placeholder);
+    void (async () => {
+      try {
+        const history = await getEvents(task.id, 0);
+        mergeEvents(task.id, history);
+        if (handles.current.get(task.id) !== placeholder) return;
+        const last = history.length ? history[history.length - 1].seq : 0;
+        const handle = streamTaskEvents(task.id, {
+          after: last,
+          onEvent: (e) => {
+            mergeEvents(task.id, [e]);
+            applyTerminalEvent(e);
+          },
+        });
+        if (handles.current.get(task.id) !== placeholder) {
+          handle.close();
+          return;
+        }
+        handles.current.set(task.id, handle);
+      } catch (err) {
+        if (handles.current.get(task.id) === placeholder) handles.current.delete(task.id);
+        setError(err instanceof Error ? err.message : "failed to load messages");
+      }
+    })();
+  };
+
+  const refreshTasks = async () => {
     const rows = await listTasks(id);
-    setTasks([...rows].sort((a, b) => a.created_at.localeCompare(b.created_at)));
-    return rows;
+    const sorted = [...rows].sort((a, b) => a.created_at.localeCompare(b.created_at));
+    setTasks(sorted);
+    for (const t of sorted) if (!TERMINAL.includes(t.status)) openStream(t);
+    return sorted;
   };
 
   useEffect(() => {
     let alive = true;
     setLoading(true);
+    closeAll();
+    setEventsByTask({});
     void (async () => {
       try {
         const [p, rows] = await Promise.all([getProject(id), listTasks(id)]);
         if (!alive) return;
         setProject(p);
-        setTasks([...rows].sort((a, b) => a.created_at.localeCompare(b.created_at)));
-        const active = [...rows]
-          .reverse()
-          .find((t) => !TERMINAL.includes(t.status));
-        if (active) void openStream(active);
+        const sorted = [...rows].sort((a, b) => a.created_at.localeCompare(b.created_at));
+        setTasks(sorted);
+        for (const t of sorted) if (!TERMINAL.includes(t.status)) openStream(t);
         const m = await listModels()
           .then((r) => r.models)
-          .catch(() => []);
+          .catch(() => [] as string[]);
         const s = await getSettings().catch(() => null);
         if (!alive) return;
         const opts = m.length ? m : FALLBACK_MODELS;
@@ -102,81 +194,26 @@ export default function Chat() {
     })();
     return () => {
       alive = false;
-      closeStream();
+      closeAll();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
+  const anyActive = tasks.some((t) => !TERMINAL.includes(t.status));
+
+  useEffect(() => {
+    if (!anyActive) return;
+    const iv = window.setInterval(() => {
+      void refreshTasks().catch(() => undefined);
+    }, 4000);
+    return () => window.clearInterval(iv);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [anyActive, id]);
+
   useEffect(() => {
     const el = feedRef.current;
     if (el && stick.current) el.scrollTop = el.scrollHeight;
-  }, [events, tasks, liveTaskId]);
-
-  const openStream = async (task: Task) => {
-    closeStream();
-    seen.current = new Set();
-    setEvents([]);
-    setLiveTaskId(task.id);
-    try {
-      const history = await getEvents(task.id, 0);
-      ingest(history);
-      const last = history.length ? history[history.length - 1].seq : 0;
-      if (TERMINAL.includes(task.status)) {
-        setLiveTaskId(null);
-        return;
-      }
-      handleRef.current = streamTaskEvents(task.id, {
-        after: last,
-        onEvent: (e) => {
-          ingest([e]);
-          applyEvent(e);
-        },
-        onStatus: setStreamStatus,
-      });
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "failed to load messages");
-    }
-  };
-
-  const ingest = (incoming: AgentEvent[]) => {
-    const fresh = incoming.filter((e) => !seen.current.has(e.seq));
-    if (!fresh.length) return;
-    fresh.forEach((e) => seen.current.add(e.seq));
-    setEvents((prev) => [...prev, ...fresh].sort((a, b) => a.seq - b.seq));
-  };
-
-  const applyEvent = (e: AgentEvent) => {
-    if (e.type === "task_completed") {
-      setTasks((prev) =>
-        prev.map((t) =>
-          t.id === e.task_id
-            ? {
-                ...t,
-                status: "done",
-                result_summary: String(e.payload.result_summary ?? t.result_summary ?? ""),
-              }
-            : t,
-        ),
-      );
-    } else if (e.type === "task_failed") {
-      setTasks((prev) =>
-        prev.map((t) =>
-          t.id === e.task_id
-            ? { ...t, status: "failed", error: String(e.payload.error ?? "") }
-            : t,
-        ),
-      );
-    } else if (e.type === "task_stopped") {
-      setTasks((prev) =>
-        prev.map((t) => (t.id === e.task_id ? { ...t, status: "stopped" } : t)),
-      );
-    }
-    if (e.type === "task_completed" || e.type === "task_failed" || e.type === "task_stopped") {
-      closeStream();
-      setLiveTaskId(null);
-      void loadTasks().catch(() => undefined);
-    }
-  };
+  }, [eventsByTask, tasks]);
 
   const send = async () => {
     const prompt = input.trim();
@@ -188,7 +225,7 @@ export default function Chat() {
       setInput("");
       setTasks((prev) => [...prev, task].sort((a, b) => a.created_at.localeCompare(b.created_at)));
       stick.current = true;
-      await openStream(task);
+      openStream(task);
     } catch (err) {
       setError(err instanceof Error ? err.message : "failed to send message");
     } finally {
@@ -197,28 +234,42 @@ export default function Chat() {
   };
 
   const doStop = async () => {
-    if (!liveTaskId) return;
+    const target = [...tasks].reverse().find((t) => !TERMINAL.includes(t.status));
+    if (!target) return;
     try {
-      await stopTask(liveTaskId);
+      await stopTask(target.id);
     } catch (err) {
       setError(err instanceof Error ? err.message : "failed to stop");
     }
   };
 
+  const streamText = useMemo(() => {
+    const map: Record<string, string> = {};
+    for (const [tid, list] of Object.entries(eventsByTask)) {
+      let buf = "";
+      for (const e of list) {
+        if (e.type === "agent_delta") buf += str(e.payload.content);
+        else if (e.type === "agent_message") buf = "";
+      }
+      if (buf) map[tid] = buf;
+    }
+    return map;
+  }, [eventsByTask]);
+
   const decided = useMemo(() => {
     const map: Record<string, "approved" | "denied"> = {};
-    for (const e of events) {
-      if (e.type !== "approval_decision") continue;
-      const aid = String(e.payload.approval_id ?? "");
-      const decision = String(e.payload.decision ?? "");
-      if (aid && (decision === "approve" || decision === "deny")) {
-        map[aid] = decision === "approve" ? "approved" : "denied";
+    for (const list of Object.values(eventsByTask)) {
+      for (const e of list) {
+        if (e.type !== "approval_decision") continue;
+        const aid = String(e.payload.approval_id ?? "");
+        const decision = String(e.payload.decision ?? "");
+        if (aid && (decision === "approve" || decision === "deny")) {
+          map[aid] = decision === "approve" ? "approved" : "denied";
+        }
       }
     }
     return map;
-  }, [events]);
-
-  const visibleEvents = useMemo(() => events.filter((e) => e.type !== "checkpoint"), [events]);
+  }, [eventsByTask]);
 
   const onScroll = () => {
     const el = feedRef.current;
@@ -242,8 +293,6 @@ export default function Chat() {
     );
   }
 
-  const live = streamStatus === "connected";
-
   return (
     <div className="safe-top flex min-h-dvh flex-col px-4 pt-4">
       <div className="mb-3 flex items-center gap-2">
@@ -254,12 +303,10 @@ export default function Chat() {
         <h1 className="min-w-0 flex-1 truncate text-base font-semibold text-zinc-100">
           {project.name}
         </h1>
-        {liveTaskId ? (
+        {anyActive ? (
           <span className="flex items-center gap-1.5 text-[11px] text-zinc-500">
-            <span
-              className={`h-2 w-2 rounded-full ${live ? "bg-emerald-400" : "bg-amber-500"} pulse-dot`}
-            />
-            {live ? "working" : streamStatus}
+            <span className="h-2 w-2 rounded-full bg-emerald-400 pulse-dot" />
+            working
           </span>
         ) : null}
       </div>
@@ -281,51 +328,50 @@ export default function Chat() {
             <ChatIcon className="h-8 w-8 text-zinc-700" />
             <p className="text-sm text-zinc-400">Ask me anything</p>
             <p className="max-w-xs text-xs text-zinc-600">
-              I can search the web, read and send email, check GitHub, and more.
+              I can build files, search the web, read and send email, use GitHub, and more.
             </p>
           </div>
         ) : (
           tasks.map((task) => {
-            const isLive = task.id === liveTaskId;
+            const events = (eventsByTask[task.id] ?? []).filter((e) => e.type !== "checkpoint");
+            const hasCompleted = events.some((e) => e.type === "task_completed");
+            const active = !TERMINAL.includes(task.status);
             return (
               <div key={task.id} className="flex flex-col gap-2.5">
                 <UserBubble text={task.prompt} />
-                {isLive ? (
-                  visibleEvents.length === 0 ? (
-                    <div className="flex items-center gap-2 pl-1 text-xs text-zinc-500">
-                      <Spinner className="h-3.5 w-3.5" /> thinking…
-                    </div>
-                  ) : (
-                    visibleEvents.map((event) => (
-                      <EventCard
-                        key={event.seq}
-                        event={event}
-                        decidedApprovals={decided}
-                        onDecided={() => undefined}
-                      />
-                    ))
-                  )
-                ) : task.status === "done" ? (
-                  <AssistantBubble text={task.result_summary || ""} />
-                ) : task.status === "failed" ? (
-                  <div className="rounded-xl border border-red-800/70 bg-red-950/25 px-3.5 py-3">
-                    <p className="text-xs font-semibold uppercase tracking-wide text-red-300">
-                      Failed
-                    </p>
-                    <p className="mt-1 whitespace-pre-wrap text-sm text-zinc-300">
-                      {task.error || "the agent hit an error"}
-                    </p>
-                  </div>
-                ) : task.status === "stopped" ? (
-                  <div className="flex items-center justify-between rounded-xl border border-zinc-700 bg-zinc-900/60 px-3.5 py-2.5">
-                    <p className="text-xs text-zinc-400">Stopped</p>
-                    <StatusBadge status={task.status} compact />
-                  </div>
-                ) : (
+                {events.map((event) => (
+                  <EventCard
+                    key={event.seq}
+                    event={event}
+                    decidedApprovals={decided}
+                    onDecided={() => undefined}
+                  />
+                ))}
+                {streamText[task.id] ? <StreamingBubble text={streamText[task.id]} /> : null}
+                {active ? (
                   <div className="flex items-center gap-2 pl-1 text-xs text-zinc-500">
-                    <Spinner className="h-3.5 w-3.5" /> queued…
+                    <Spinner className="h-3.5 w-3.5" /> {statusLabel(task.status)}
                   </div>
-                )}
+                ) : task.status === "done" ? (
+                  !hasCompleted ? <AssistantBubble text={task.result_summary || ""} /> : null
+                ) : task.status === "failed" ? (
+                  !events.some((e) => e.type === "task_failed") ? (
+                    <div className="rounded-xl border border-red-800/70 bg-red-950/25 px-3.5 py-3">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-red-300">
+                        Failed
+                      </p>
+                      <p className="mt-1 whitespace-pre-wrap text-sm text-zinc-300">
+                        {task.error || "the agent hit an error"}
+                      </p>
+                    </div>
+                  ) : null
+                ) : task.status === "stopped" ? (
+                  !events.some((e) => e.type === "task_stopped") ? (
+                    <div className="rounded-xl border border-zinc-700 bg-zinc-900/60 px-3.5 py-2.5">
+                      <p className="text-xs text-zinc-400">Stopped</p>
+                    </div>
+                  ) : null
+                ) : null}
               </div>
             );
           })
@@ -360,7 +406,7 @@ export default function Chat() {
               }
             }}
           />
-          {liveTaskId ? (
+          {anyActive ? (
             <button
               className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-red-700 text-white active:bg-red-800"
               onClick={() => void doStop()}

@@ -3,8 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { createProject, deleteProject, listProjects, type Project } from "../lib/api";
 import EmptyState from "../components/EmptyState";
 import Spinner from "../components/Spinner";
-import { ChatIcon, PlusIcon, RepoIcon, TrashIcon } from "../components/Icons";
-import { card } from "../lib/ui";
+import { ChatIcon, ChevronIcon, PlusIcon, RepoIcon, TrashIcon } from "../components/Icons";
 
 export default function Chats() {
   const navigate = useNavigate();
@@ -53,48 +52,56 @@ export default function Chats() {
   const chats = projects.filter((p) => p.kind !== "repo");
 
   return (
-    <div className="safe-top px-4 pt-4">
-      <div className="mb-4 flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <ChatIcon className="h-5 w-5 text-emerald-400" />
-          <h1 className="text-xl font-bold text-zinc-100">Chats</h1>
+    <div className="safe-top px-4 pb-nav pt-5">
+      <header className="mb-5 flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight text-zinc-50">Chats</h1>
+          <p className="mt-0.5 text-xs text-zinc-500">Your autonomous agent, on tap</p>
         </div>
         <button
           onClick={() => void newChat()}
           disabled={creating}
-          className="flex h-10 w-10 items-center justify-center rounded-full bg-emerald-600 text-white active:bg-emerald-700 disabled:opacity-50"
+          className="flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-b from-emerald-500 to-emerald-600 text-white shadow-lg shadow-emerald-950/40 transition-transform active:scale-95 disabled:opacity-50"
           aria-label="New chat"
         >
           {creating ? <Spinner className="h-4 w-4" /> : <PlusIcon />}
         </button>
-      </div>
+      </header>
 
       {error ? (
-        <p className="mb-3 rounded-lg border border-red-900/60 bg-red-950/20 px-3 py-2 text-xs text-red-300">
+        <p className="animate-fade-in mb-3 rounded-2xl border border-red-900/60 bg-red-950/20 px-4 py-2.5 text-xs text-red-300">
           {error}
         </p>
       ) : null}
 
       {loading ? (
-        <div className="flex justify-center py-12 text-zinc-500">
+        <div className="flex justify-center py-16 text-zinc-500">
           <Spinner />
         </div>
       ) : chats.length === 0 ? (
         <EmptyState
+          icon={<ChatIcon />}
           title="No chats yet"
           description="Tap + to start a conversation. Ask the agent to search, read email, or work on GitHub."
         />
       ) : (
         <div className="flex flex-col gap-2.5">
-          {chats.map((project) => (
-            <div key={project.id} className={`${card} flex items-center gap-3`}>
+          {chats.map((project, i) => (
+            <div
+              key={project.id}
+              className="animate-rise flex items-center gap-3 rounded-2xl border border-zinc-800/80 bg-zinc-900/50 px-3.5 py-3 backdrop-blur-sm"
+              style={{ animationDelay: `${Math.min(i, 8) * 30}ms` }}
+            >
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-400 ring-1 ring-emerald-500/20">
+                <ChatIcon className="h-5 w-5" />
+              </div>
               <Link to={`/c/${project.id}`} className="min-w-0 flex-1">
                 <p className="truncate text-sm font-semibold text-zinc-100">{project.name}</p>
-                <p className="mt-0.5 text-[11px] text-zinc-600">tap to continue</p>
+                <p className="mt-0.5 text-[11px] text-zinc-500">Tap to continue</p>
               </Link>
               <button
                 onClick={() => void remove(project)}
-                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-zinc-600 active:bg-zinc-800 active:text-red-400"
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-zinc-600 transition-colors active:bg-zinc-800 active:text-red-400"
                 aria-label="Delete chat"
               >
                 <TrashIcon className="h-4 w-4" />
@@ -106,14 +113,16 @@ export default function Chats() {
 
       <Link
         to="/projects"
-        className="mt-4 flex items-center gap-2.5 rounded-2xl border border-zinc-800 bg-zinc-900/40 px-4 py-3.5"
+        className="mt-4 flex items-center gap-3 rounded-2xl border border-zinc-800/80 bg-zinc-900/40 px-4 py-3.5 transition-colors active:bg-zinc-900"
       >
-        <RepoIcon className="h-5 w-5 text-zinc-500" />
+        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-zinc-800/60 text-zinc-400">
+          <RepoIcon className="h-5 w-5" />
+        </div>
         <div className="min-w-0 flex-1">
           <p className="text-sm font-semibold text-zinc-200">Code workspaces</p>
-          <p className="text-[11px] text-zinc-600">Repo-scoped tasks and pull requests</p>
+          <p className="text-[11px] text-zinc-500">Repo-scoped tasks and pull requests</p>
         </div>
-        <span className="text-zinc-600">→</span>
+        <ChevronIcon className="h-4 w-4 text-zinc-600" />
       </Link>
     </div>
   );
