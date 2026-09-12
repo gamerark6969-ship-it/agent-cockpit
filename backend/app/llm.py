@@ -102,7 +102,15 @@ class LLMClient:
                 resp = await client.request(
                     method, url, headers=self._headers(), json=json_body
                 )
-                if resp.status_code == 429 or resp.status_code >= 500:
+                if resp.status_code == 429:
+                    last_exc = LLMError(f"LLM HTTP 429: {resp.text[:500]}")
+                    if attempt >= 1:
+                        # Quota errors rarely clear on a quick retry — surface
+                        # immediately so the caller can fail over to another model.
+                        raise last_exc
+                    await asyncio.sleep(_retry_delay(resp.text, attempt))
+                    continue
+                if resp.status_code >= 500:
                     last_exc = LLMError(f"LLM HTTP {resp.status_code}: {resp.text[:500]}")
                     await asyncio.sleep(_retry_delay(resp.text, attempt))
                     continue
@@ -185,7 +193,15 @@ class LLMClient:
             got_any = False
             try:
                 async with client.stream("POST", url, headers=self._headers(), json=body) as resp:
-                    if resp.status_code == 429 or resp.status_code >= 500:
+                    if resp.status_code == 429:
+                        raw = await resp.aread()
+                        text = raw[:500].decode("utf-8", "replace")
+                        last_exc = LLMError(f"LLM HTTP 429: {text}")
+                        if attempt >= 1:
+                            raise last_exc
+                        await asyncio.sleep(_retry_delay(text, attempt))
+                        continue
+                    if resp.status_code >= 500:
                         raw = await resp.aread()
                         text = raw[:500].decode("utf-8", "replace")
                         last_exc = LLMError(f"LLM HTTP {resp.status_code}: {text}")

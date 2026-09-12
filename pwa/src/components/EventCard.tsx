@@ -330,6 +330,14 @@ export default function EventCard({
 }: EventCardProps) {
   const p = event.payload || {};
   switch (event.type) {
+    case "model_switch":
+      return (
+        <div className="flex justify-center py-0.5">
+          <span className="rounded-full border border-zinc-800/80 bg-zinc-900/50 px-2.5 py-0.5 text-[10px] text-zinc-500">
+            {str(p.from)} busy · switched to {str(p.to)}
+          </span>
+        </div>
+      );
     case "agent_delta":
       return null;
     case "agent_message":

@@ -163,11 +163,12 @@ def _is_rate_limited(exc: Exception) -> bool:
     return "429" in text or "RESOURCE_EXHAUSTED" in text
 
 
-async def _llm_stream(task_id: str, messages: List[Dict[str, Any]], tool_defs, model: str) -> Dict[str, Any]:
+async def _llm_stream(task_id: str, messages: List[Dict[str, Any]], tool_defs, model: str) -> tuple:
     """Call the LLM with streaming, emitting throttled ``agent_delta`` events.
 
-    Retries with the provider's suggested delay on quota errors, then fails
-    over to another model so the turn still completes quickly.
+    On quota errors (429) it fails over to another model, persists the switch
+    on the task and returns the model that actually answered, so later
+    iterations stick with the working model.
     """
     pending: List[str] = []
     pending_len = 0
@@ -200,7 +201,7 @@ async def _llm_stream(task_id: str, messages: List[Dict[str, Any]], tool_defs, m
                 [_wire_msg(m) for m in messages], tools=tool_defs, model=candidate, on_delta=on_delta
             )
             await flush()
-            return assistant
+            return assistant, candidate
         except LLMNotConfigured:
             raise
         except LLMError as exc:
@@ -210,11 +211,10 @@ async def _llm_stream(task_id: str, messages: List[Dict[str, Any]], tool_defs, m
             nxt = next((m for m in chain[i + 1:] if client_for(m).configured), None)
             if nxt is None:
                 raise
-            await _emit(
-                task_id,
-                "error",
-                {"message": f"{candidate} is rate-limited; continuing with {nxt}"},
-            )
+            await _emit(task_id, "model_switch", {"from": candidate, "to": nxt})
+            if candidate == model:
+                # sticky: remember the working model for the rest of the task
+                await _update_task(task_id, model=nxt)
     raise last_exc or LLMError("LLM request failed")
 
 
@@ -578,7 +578,7 @@ async def run_agent_loop(task_id: str, worker) -> None:
 
             # LLM call (streamed so the user sees the response as it is written)
             try:
-                assistant = await _llm_stream(task_id, messages, tool_defs, model)
+                assistant, model = await _llm_stream(task_id, messages, tool_defs, model)
             except LLMNotConfigured:
                 await _finish_failed(task_id, "AGENTROUTER_BASE_URL/AGENTROUTER_API_KEY not configured")
                 return
