@@ -197,8 +197,9 @@ def _wire_messages_for_model(messages: List[Dict[str, Any]], model: str) -> List
 
     Gemini 3 rejects history containing function calls without a
     thought_signature — which is every call made by a different provider.
-    When switching models mid-task, rewrite that tool traffic as plain text so
-    the conversation stays usable. Signed (Gemini-native) calls pass through.
+    When switching models mid-task, rewrite that tool traffic as a plain-text
+    transcript so the conversation stays usable. Signed (Gemini-native) calls
+    pass through untouched.
     """
     if not model.startswith(("gemini-3", "gemini-flash-latest", "gemini-pro-latest")):
         return messages
@@ -210,21 +211,25 @@ def _wire_messages_for_model(messages: List[Dict[str, Any]], model: str) -> List
     if all(_signed(tc) for m in messages for tc in (m.get("tool_calls") or [])):
         return messages
 
+    call_desc: Dict[str, str] = {}
+    for m in messages:
+        for tc in m.get("tool_calls") or []:
+            fn = tc.get("function") or {}
+            call_desc[tc.get("id") or ""] = "{}({})".format(
+                fn.get("name", "tool"), str(fn.get("arguments") or "")[:300]
+            )
+
     out: List[Dict[str, Any]] = []
     for m in messages:
         if m.get("tool_calls"):
-            calls = "; ".join(
-                "{}({})".format(
-                    (tc.get("function") or {}).get("name", "tool"),
-                    str((tc.get("function") or {}).get("arguments") or "")[:400],
-                )
-                for tc in m["tool_calls"]
-            )
             content = (m.get("content") or "").strip()
-            text = f"{content}\n[used tools: {calls}]".strip()
-            out.append({"role": "assistant", "content": text})
+            if content:
+                out.append({"role": "assistant", "content": content})
         elif m.get("role") == "tool" or m.get("tool_call_id"):
-            out.append({"role": "user", "content": f"[tool result] {(m.get('content') or '')[:4000]}"})
+            desc = call_desc.get(m.get("tool_call_id") or "", "tool")
+            out.append(
+                {"role": "user", "content": f"[tool {desc}]\n{(m.get('content') or '')[:4000]}"}
+            )
         else:
             out.append(m)
     return out
@@ -686,11 +691,15 @@ async def run_agent_loop(task_id: str, worker) -> None:
                 await _emit(task_id, "agent_message", {"content": content})
 
             if not tool_calls:
-                if is_chat and content.strip():
+                stripped = content.strip()
+                # A reply that merely echoes the rewritten tool transcript is
+                # not a real answer — nudge instead of finishing on it.
+                looks_like_echo = stripped.startswith(("[tool", "[used tools", "[SYSTEM NOTE]"))
+                if is_chat and stripped and not looks_like_echo:
                     # The model answered directly — finish now instead of
                     # burning another round-trip on a "call finish" nudge.
                     finished = True
-                    result_summary = content.strip()
+                    result_summary = stripped
                     break
                 if is_chat:
                     nudge_text = (
