@@ -19,6 +19,7 @@ from ..llm import (
     chat as llm_chat,
     chat_stream as llm_chat_stream,
     client_for,
+    retry_delay_from_error,
 )
 from ..models import Approval, Message, Task, Project, new_id, utcnow
 from ..permissions import evaluate
@@ -158,6 +159,11 @@ DELTA_FLUSH_SECONDS = 0.25
 FALLBACK_MODELS = ("deepseek-v4.1-flash", "gemini-3.8-flash", "gemini-flash-latest")
 
 
+# How many times we wait out a quota window on the same model when no
+# failover is possible (see _llm_stream).
+STICKY_QUOTA_WAITS = 3
+
+
 def _is_rate_limited(exc: Exception) -> bool:
     text = str(exc)
     return "429" in text or "RESOURCE_EXHAUSTED" in text
@@ -166,9 +172,12 @@ def _is_rate_limited(exc: Exception) -> bool:
 async def _llm_stream(task_id: str, messages: List[Dict[str, Any]], tool_defs, model: str) -> tuple:
     """Call the LLM with streaming, emitting throttled ``agent_delta`` events.
 
-    On quota errors (429) it fails over to another model, persists the switch
-    on the task and returns the model that actually answered, so later
-    iterations stick with the working model.
+    Quota policy: while the conversation has no tool calls yet, a 429 fails
+    over instantly to another model. Once tool calls exist we stay on the same
+    model and wait out the quota window — Gemini 3 rejects history containing
+    function calls that were made (unsigned) by a different model, so
+    switching providers mid-task would corrupt the conversation. Returns
+    (assistant_message, model_that_answered).
     """
     pending: List[str] = []
     pending_len = 0
@@ -191,26 +200,38 @@ async def _llm_stream(task_id: str, messages: List[Dict[str, Any]], tool_defs, m
         if pending_len >= DELTA_FLUSH_CHARS or (time.monotonic() - last_flush) >= DELTA_FLUSH_SECONDS:
             await flush()
 
-    chain = [model] + [m for m in FALLBACK_MODELS if m != model]
+    has_tool_history = any(m.get("tool_calls") for m in messages)
+    chain = [model]
+    if not has_tool_history:
+        chain += [m for m in FALLBACK_MODELS if m != model]
+
     last_exc: Exception | None = None
     for i, candidate in enumerate(chain):
         if not client_for(candidate).configured:
             continue
-        try:
-            assistant = await llm_chat_stream(
-                [_wire_msg(m) for m in messages], tools=tool_defs, model=candidate, on_delta=on_delta
-            )
-            await flush()
-            return assistant, candidate
-        except LLMNotConfigured:
-            raise
-        except LLMError as exc:
-            last_exc = exc
-            if not _is_rate_limited(exc) or i >= len(chain) - 1:
+        attempts = 1 if i < len(chain) - 1 else STICKY_QUOTA_WAITS
+        for attempt in range(attempts):
+            try:
+                assistant = await llm_chat_stream(
+                    [_wire_msg(m) for m in messages],
+                    tools=tool_defs,
+                    model=candidate,
+                    on_delta=on_delta,
+                )
+                await flush()
+                return assistant, candidate
+            except LLMNotConfigured:
                 raise
-            nxt = next((m for m in chain[i + 1:] if client_for(m).configured), None)
-            if nxt is None:
-                raise
+            except LLMError as exc:
+                last_exc = exc
+                if not _is_rate_limited(exc):
+                    raise
+                if attempt < attempts - 1:
+                    delay = retry_delay_from_error(str(exc)) or 45.0
+                    await asyncio.sleep(min(delay + 1.0, 90.0))
+                    continue
+        nxt = next((m for m in chain[i + 1:] if client_for(m).configured), None)
+        if nxt is not None:
             await _emit(task_id, "model_switch", {"from": candidate, "to": nxt})
             if candidate == model:
                 # sticky: remember the working model for the rest of the task

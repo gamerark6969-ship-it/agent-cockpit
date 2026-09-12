@@ -64,6 +64,17 @@ def _retry_delay(text: str, attempt: int) -> float:
     return min(2.0**attempt, 30.0)
 
 
+def retry_delay_from_error(text: str) -> float | None:
+    """Provider-suggested wait (seconds) from a quota error body, if present."""
+    m = _RETRY_DELAY_RE.search(text or "")
+    if m:
+        try:
+            return float(m.group(1))
+        except ValueError:
+            return None
+    return None
+
+
 class LLMClient:
     def __init__(self, base_url: Optional[str], api_key: Optional[str], model: str, timeout: float = 300.0):
         self.base_url = (base_url or "").rstrip("/")
@@ -103,13 +114,8 @@ class LLMClient:
                     method, url, headers=self._headers(), json=json_body
                 )
                 if resp.status_code == 429:
-                    last_exc = LLMError(f"LLM HTTP 429: {resp.text[:500]}")
-                    if attempt >= 1:
-                        # Quota errors rarely clear on a quick retry — surface
-                        # immediately so the caller can fail over to another model.
-                        raise last_exc
-                    await asyncio.sleep(_retry_delay(resp.text, attempt))
-                    continue
+                    # Fail fast: the agent loop owns quota retry/failover policy.
+                    raise LLMError(f"LLM HTTP 429: {resp.text[:500]}")
                 if resp.status_code >= 500:
                     last_exc = LLMError(f"LLM HTTP {resp.status_code}: {resp.text[:500]}")
                     await asyncio.sleep(_retry_delay(resp.text, attempt))
@@ -194,13 +200,9 @@ class LLMClient:
             try:
                 async with client.stream("POST", url, headers=self._headers(), json=body) as resp:
                     if resp.status_code == 429:
+                        # Fail fast: the agent loop owns quota retry/failover policy.
                         raw = await resp.aread()
-                        text = raw[:500].decode("utf-8", "replace")
-                        last_exc = LLMError(f"LLM HTTP 429: {text}")
-                        if attempt >= 1:
-                            raise last_exc
-                        await asyncio.sleep(_retry_delay(text, attempt))
-                        continue
+                        raise LLMError(f"LLM HTTP 429: {raw[:500].decode('utf-8', 'replace')}")
                     if resp.status_code >= 500:
                         raw = await resp.aread()
                         text = raw[:500].decode("utf-8", "replace")
