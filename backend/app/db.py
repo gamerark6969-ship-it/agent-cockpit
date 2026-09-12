@@ -20,7 +20,10 @@ async def get_session():
 def _default_settings() -> dict:
     from .schemas import SettingsOut
 
-    return SettingsOut().model_dump()
+    data = SettingsOut().model_dump()
+    if settings.AGENTROUTER_DEFAULT_MODEL:
+        data["default_model"] = settings.AGENTROUTER_DEFAULT_MODEL
+    return data
 
 
 async def get_settings_data(session) -> dict:

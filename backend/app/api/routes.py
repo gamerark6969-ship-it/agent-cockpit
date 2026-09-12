@@ -191,7 +191,7 @@ async def create_task(project_id: str, body: TaskCreate):
             project_id=project_id,
             prompt=body.prompt,
             status="queued",
-            model=body.model or str(settings_data.get("default_model") or "gpt-4.1"),
+            model=body.model or str(settings_data.get("default_model") or "gemini-2.5-flash"),
         )
         session.add(task)
         await session.commit()

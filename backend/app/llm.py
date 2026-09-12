@@ -5,6 +5,39 @@ import httpx
 
 from .config import settings
 
+# Gemini's OpenAI-compatible /models endpoint lists every model (embeddings,
+# TTS, image, video, ...). The agent only does chat, so keep generative chat
+# models and drop the rest.
+_NON_CHAT_MARKERS = (
+    "embedding",
+    "tts",
+    "image",
+    "audio",
+    "live",
+    "veo",
+    "lyria",
+    "transcribe",
+    "robotics",
+    "computer-use",
+    "nano-banana",
+    "antigravity",
+    "deep-research",
+    "aqa",
+)
+
+
+def _normalize_model_id(raw: str) -> str:
+    mid = (raw or "").strip()
+    if mid.startswith("models/"):
+        mid = mid[len("models/") :]
+    return mid
+
+
+def _is_chat_model(mid: str) -> bool:
+    if not mid or "gemini" not in mid.lower():
+        return False
+    return not any(marker in mid.lower() for marker in _NON_CHAT_MARKERS)
+
 
 class LLMError(Exception):
     pass
@@ -121,7 +154,12 @@ class LLMClient:
                 if resp.status_code >= 400:
                     raise LLMError(f"models HTTP {resp.status_code}: {resp.text[:300]}")
                 data = resp.json()
-                return [str(m.get("id")) for m in data.get("data", []) if m.get("id")]
+                models: List[str] = []
+                for m in data.get("data", []):
+                    mid = _normalize_model_id(str(m.get("id") or ""))
+                    if _is_chat_model(mid) and mid not in models:
+                        models.append(mid)
+                return models
             except httpx.HTTPError as exc:
                 last_exc = LLMError(f"models transport error: {exc}")
                 await asyncio.sleep(2**attempt)

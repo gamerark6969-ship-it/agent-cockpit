@@ -21,7 +21,7 @@ import { ChatIcon, SendIcon, StopIcon } from "../components/Icons";
 import { inputBase, textareaBase } from "../lib/ui";
 
 const TERMINAL: TaskStatus[] = ["done", "failed", "stopped"];
-const FALLBACK_MODELS = ["gemini-2.5-flash", "gemini-2.5-pro", "gpt-4.1"];
+const FALLBACK_MODELS = ["gemini-2.5-flash", "gemini-2.5-pro"];
 
 function UserBubble({ text }: { text: string }) {
   return (

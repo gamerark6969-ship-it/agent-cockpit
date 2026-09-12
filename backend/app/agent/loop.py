@@ -350,7 +350,7 @@ async def run_agent_loop(task_id: str, worker) -> None:
         return
 
     resume = task.status in ("running", "awaiting_approval")
-    model = task.model or str(settings_data.get("default_model") or "gpt-4.1")
+    model = task.model or str(settings_data.get("default_model") or "gemini-2.5-flash")
     max_iterations = int(settings_data.get("max_iterations") or 50)
     token_budget = int(settings_data.get("token_budget") or 2000000)
     command_timeout_s = int(settings_data.get("command_timeout_s") or 600)
