@@ -256,6 +256,17 @@ async def deploy_site(ctx, args: dict) -> Tuple[bool, str, Optional[dict]]:
     title = str(args.get("title") or "").strip()
 
     kind = await _stat(sbx, path)
+    if kind is None and not raw.startswith("/"):
+        # Model may have written files under a different base than it deploys
+        # from (e.g. /home/user/repo vs /home/user/work on chat tasks).
+        for base in (sbx_mod.WORK_DIR, sbx_mod.REPO_DIR):
+            alt = posixpath.join(base, raw)
+            if alt == path:
+                continue
+            alt_kind = await _stat(sbx, alt)
+            if alt_kind:
+                path, kind = alt, alt_kind
+                break
     if kind is None:
         return False, f"path not found in sandbox: {path}", None
     if kind == "dir":

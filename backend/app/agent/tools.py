@@ -25,7 +25,7 @@ TOOL_DEFINITIONS: List[dict] = [
         "type": "function",
         "function": {
             "name": "bash",
-            "description": f"Run a shell command in the Linux sandbox. Working directory is {REPO_DIR}. Returns combined stdout+stderr and the exit code.",
+            "description": "Run a shell command in the Linux sandbox. The working directory is your current workspace (run `pwd` to see it). Returns combined stdout+stderr and the exit code.",
             "parameters": {
                 "type": "object",
                 "properties": {
