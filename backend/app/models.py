@@ -56,6 +56,8 @@ class Task(Base):
     sandbox_id: Mapped[str | None] = mapped_column(Text, nullable=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     result_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Full pydantic-ai conversation dump (JSON) so a restarted task resumes its tool trace.
+    pa_history: Mapped[list | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 

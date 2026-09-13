@@ -23,6 +23,17 @@ async def lifespan(app: FastAPI):
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        # Lightweight migration for pre-existing deployments: create_all() only
+        # creates missing tables, it never alters existing ones.
+        if engine.dialect.name == "postgresql":
+            await conn.exec_driver_sql(
+                "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS pa_history JSONB"
+            )
+        else:
+            try:
+                await conn.exec_driver_sql("ALTER TABLE tasks ADD COLUMN pa_history JSON")
+            except Exception:
+                pass  # already present (fresh database)
     await seed_settings()
     await seed_connectors_from_env()
     await worker.resume_interrupted_tasks()

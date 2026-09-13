@@ -43,6 +43,9 @@ class Settings(BaseSettings):
     DEFAULT_COMMAND_TIMEOUT_S: int = 600
     DEFAULT_APPROVAL_TIMEOUT_S: int = 1800
 
+    # Agent loop implementation: "pydantic_ai" (default) or "legacy".
+    AGENT_FRAMEWORK: str = "pydantic_ai"
+
     # How many tasks the background worker runs at once.
     WORKER_CONCURRENCY: int = 3
 
