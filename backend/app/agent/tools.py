@@ -433,6 +433,7 @@ echo "## manifests"
 for f in package.json pyproject.toml requirements.txt go.mod Cargo.toml pom.xml; do
   [ -f "$f" ] && { echo "--- $f"; head -40 "$f"; }
 done
+exit 0
 '''
 
 
