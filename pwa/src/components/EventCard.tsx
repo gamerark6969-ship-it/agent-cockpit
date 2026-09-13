@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { decideApproval, type AgentEvent } from "../lib/api";
 import { prettyJson, truncate } from "../lib/utils";
-import { CheckIcon, ChevronIcon, CodeIcon, GitPrIcon, WarningIcon, XIcon } from "./Icons";
+import { CheckIcon, ChevronIcon, CodeIcon, GitPrIcon, GlobeIcon, WarningIcon, XIcon } from "./Icons";
 import Spinner from "./Spinner";
 import AuthedImage from "./AuthedImage";
 import FilePreview from "./FilePreview";
@@ -385,6 +385,74 @@ export default function EventCard({
           title={str(p.title)}
         />
       );
+    case "deployed": {
+      const live = str(p.url);
+      const persistent = str(p.persistent_url);
+      const backup = str(p.artifact_url);
+      const title = str(p.title);
+      return (
+        <div className="rounded-2xl border border-emerald-800/70 bg-emerald-950/20 px-3.5 py-3">
+          <div className="flex items-center gap-2">
+            <GlobeIcon className="h-4 w-4 text-emerald-400" />
+            <span className="text-xs font-semibold uppercase tracking-wide text-emerald-300">
+              Site deployed
+            </span>
+          </div>
+          {title ? <p className="mt-1 text-sm text-zinc-200">{title}</p> : null}
+          <div className="mt-2 flex flex-col gap-2">
+            {persistent ? (
+              <a
+                href={persistent}
+                target="_blank"
+                rel="noreferrer"
+                className="flex h-10 items-center justify-center gap-2 rounded-lg bg-emerald-600 text-sm font-semibold text-white active:bg-emerald-700"
+              >
+                <GlobeIcon className="h-4 w-4" /> Open site
+              </a>
+            ) : live ? (
+              <a
+                href={live}
+                target="_blank"
+                rel="noreferrer"
+                className="flex h-10 items-center justify-center gap-2 rounded-lg bg-emerald-600 text-sm font-semibold text-white active:bg-emerald-700"
+              >
+                <GlobeIcon className="h-4 w-4" /> Open live preview
+              </a>
+            ) : backup ? (
+              <a
+                href={backup}
+                target="_blank"
+                rel="noreferrer"
+                className="flex h-10 items-center justify-center gap-2 rounded-lg bg-emerald-600 text-sm font-semibold text-white active:bg-emerald-700"
+              >
+                <GlobeIcon className="h-4 w-4" /> Open page
+              </a>
+            ) : null}
+            {persistent && live ? (
+              <a href={live} target="_blank" rel="noreferrer" className="text-center text-[11px] text-emerald-400/80">
+                live preview (temporary)
+              </a>
+            ) : null}
+          </div>
+        </div>
+      );
+    }
+    case "steered":
+      return (
+        <div className="flex justify-end">
+          <span className="rounded-full border border-emerald-900/70 bg-emerald-950/30 px-2.5 py-0.5 text-[11px] text-emerald-300/90">
+            steered: {str(p.message)}
+          </span>
+        </div>
+      );
+    case "context_compacted":
+      return (
+        <div className="flex justify-center py-0.5">
+          <span className="rounded-full border border-zinc-800/80 bg-zinc-900/50 px-2.5 py-0.5 text-[10px] text-zinc-500">
+            context compacted
+          </span>
+        </div>
+      );
     case "approval_request":
       return (
         <ApprovalCard
@@ -467,4 +535,109 @@ export default function EventCard({
         </div>
       );
   }
+}
+
+const WORK_NOISE = new Set([
+  "tool_call",
+  "tool_result",
+  "terminal",
+  "checkpoint",
+  "model_switch",
+  "context_compacted",
+]);
+
+export type FeedRow =
+  | { kind: "event"; event: AgentEvent }
+  | { kind: "work"; key: number; events: AgentEvent[] };
+
+/** Collapse consecutive low-level steps into a single work-log group. */
+export function groupFeed(events: AgentEvent[]): FeedRow[] {
+  const visible = events.filter(
+    (e) =>
+      e.type !== "tool_call" &&
+      !(e.type === "tool_result" && (str(e.payload.tool) === "bash" || str(e.payload.tool) === "finish")),
+  );
+  const rows: FeedRow[] = [];
+  let buf: AgentEvent[] = [];
+  const flush = () => {
+    if (buf.length) rows.push({ kind: "work", key: buf[0].seq, events: buf });
+    buf = [];
+  };
+  for (const e of visible) {
+    if (WORK_NOISE.has(e.type)) {
+      buf.push(e);
+    } else {
+      flush();
+      rows.push({ kind: "event", event: e });
+    }
+  }
+  flush();
+  return rows;
+}
+
+function workLabel(e: AgentEvent | undefined): string {
+  if (!e) return "";
+  const p = e.payload || {};
+  if (e.type === "tool_result") {
+    const first = str(p.summary).split("\n").find((l) => l.trim()) || "";
+    return first ? `${str(p.tool, "tool")} · ${first}` : str(p.tool, "tool");
+  }
+  if (e.type === "terminal") return str(p.command).slice(0, 70);
+  if (e.type === "checkpoint") return `iteration ${num(p.iteration)}`;
+  if (e.type === "model_switch") return `switched to ${str(p.to)}`;
+  if (e.type === "context_compacted") return "context compacted";
+  return e.type;
+}
+
+export function WorkLog({
+  events,
+  decidedApprovals,
+  onDecided,
+}: {
+  events: AgentEvent[];
+  decidedApprovals?: Record<string, "approved" | "denied">;
+  onDecided?: () => void;
+}) {
+  const [expanded, setExpanded] = useState(events.length <= 2);
+  const tail = events[events.length - 1];
+  return (
+    <div className="rounded-2xl border border-zinc-800/70 bg-zinc-900/30 px-2 py-1.5">
+      <button
+        onClick={() => setExpanded((v) => !v)}
+        className="flex w-full items-center gap-2 px-1 py-1 text-left text-[11px] text-zinc-500 active:text-zinc-300"
+      >
+        {!expanded ? (
+          <span className="pulse-dot h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-500/70" />
+        ) : null}
+        <span className="shrink-0 font-medium text-zinc-400">
+          {events.length} step{events.length === 1 ? "" : "s"}
+        </span>
+        {!expanded && tail ? (
+          <span className="min-w-0 flex-1 truncate">{workLabel(tail)}</span>
+        ) : (
+          <span className="flex-1" />
+        )}
+        <ChevronIcon
+          className={`h-3.5 w-3.5 shrink-0 transition-transform ${expanded ? "rotate-90" : ""}`}
+        />
+      </button>
+      {expanded ? (
+        <div className="flex flex-col gap-1.5 px-0.5 pb-1">
+          {events.map((e) => (
+            <EventCard
+              key={e.seq}
+              event={e}
+              compact
+              decidedApprovals={decidedApprovals}
+              onDecided={onDecided}
+            />
+          ))}
+        </div>
+      ) : tail ? (
+        <div className="px-0.5 pb-1">
+          <EventCard event={tail} compact decidedApprovals={decidedApprovals} onDecided={onDecided} />
+        </div>
+      ) : null}
+    </div>
+  );
 }

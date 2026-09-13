@@ -38,10 +38,14 @@ class Settings(BaseSettings):
     VAPID_PRIVATE_KEY: Optional[str] = None
     VAPID_SUBJECT: str = "mailto:admin@example.com"
 
-    DEFAULT_MAX_ITERATIONS: int = 50
+    DEFAULT_MAX_ITERATIONS: int = 120
     DEFAULT_TOKEN_BUDGET: int = 2000000
     DEFAULT_COMMAND_TIMEOUT_S: int = 600
     DEFAULT_APPROVAL_TIMEOUT_S: int = 1800
+
+    # Public origin of this backend (Render sets RENDER_EXTERNAL_URL). Used to
+    # build absolute fallback artifact URLs for deploy_site.
+    PUBLIC_BASE_URL: Optional[str] = None
 
     # How many tasks the background worker runs at once.
     WORKER_CONCURRENCY: int = 3

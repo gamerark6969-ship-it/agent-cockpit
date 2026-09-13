@@ -14,13 +14,69 @@ import {
   type TaskStatus,
 } from "../lib/api";
 import { streamTaskEvents, type StreamHandle } from "../lib/sse";
-import EventCard from "../components/EventCard";
+import EventCard, { WorkLog, groupFeed } from "../components/EventCard";
 import Spinner from "../components/Spinner";
 import Markdown from "../components/Markdown";
-import { SendIcon, StopIcon } from "../components/Icons";
+import { CheckIcon, ChevronIcon, SendIcon, StopIcon } from "../components/Icons";
 
 const TERMINAL: TaskStatus[] = ["done", "failed", "stopped"];
 const FALLBACK_MODELS = ["deepseek-v4.1-flash"];
+
+const MODEL_LABELS: Record<string, string> = {
+  "deepseek-v4.1-flash": "DeepSeek V4.1 Flash",
+  "gemini-3.8-flash": "Gemini 3.8 Flash",
+};
+
+function prettyModel(id: string): string {
+  if (MODEL_LABELS[id]) return MODEL_LABELS[id];
+  return id.replace(/[-_]/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function ModelSheet({
+  models,
+  value,
+  onSelect,
+  onClose,
+}: {
+  models: string[];
+  value: string;
+  onSelect: (m: string) => void;
+  onClose: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-end bg-black/60" onClick={onClose}>
+      <div
+        className="safe-bottom w-full rounded-t-3xl border-t border-zinc-800 bg-zinc-950 px-4 pt-3"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-zinc-700" />
+        <p className="mb-3 px-1 text-xs font-semibold uppercase tracking-wide text-zinc-500">Model</p>
+        <div className="flex flex-col gap-1.5 pb-5">
+          {models.map((m) => (
+            <button
+              key={m}
+              onClick={() => {
+                onSelect(m);
+                onClose();
+              }}
+              className={`flex h-12 items-center justify-between rounded-xl border px-3.5 text-left text-sm transition-colors ${
+                m === value
+                  ? "border-emerald-700/60 bg-emerald-950/30 text-emerald-200"
+                  : "border-zinc-800 bg-zinc-900/50 text-zinc-300 active:bg-zinc-800"
+              }`}
+            >
+              <span className="flex flex-col">
+                <span className="font-medium">{prettyModel(m)}</span>
+                <span className="font-mono text-[10px] text-zinc-500">{m}</span>
+              </span>
+              {m === value ? <CheckIcon className="h-4 w-4 text-emerald-400" /> : null}
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 const str = (v: unknown, fallback = ""): string => (typeof v === "string" ? v : fallback);
 
@@ -77,6 +133,7 @@ export default function Chat() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [modelOpen, setModelOpen] = useState(false);
 
   const handles = useRef<Map<string, StreamHandle>>(new Map());
   const feedRef = useRef<HTMLDivElement | null>(null);
@@ -203,10 +260,17 @@ export default function Chat() {
 
   useEffect(() => {
     if (!anyActive) return;
-    const iv = window.setInterval(() => {
-      void refreshTasks().catch(() => undefined);
-    }, 4000);
-    return () => window.clearInterval(iv);
+    // SSE keeps the feed live; we only reconcile task statuses when the tab
+    // regains focus (cheap, and avoids the old 4s polling loop).
+    const onFocus = () => {
+      if (document.visibilityState === "visible") void refreshTasks().catch(() => undefined);
+    };
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onFocus);
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onFocus);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [anyActive, id]);
 
@@ -343,19 +407,29 @@ export default function Chat() {
             const events = (eventsByTask[task.id] ?? []).filter(
               (e) => e.type !== "checkpoint" && e.type !== "task_started",
             );
+            const rows = groupFeed(events);
             const active = !TERMINAL.includes(task.status);
             return (
               <div key={task.id} className="flex flex-col gap-2.5">
                 <UserBubble text={task.prompt} />
-                {events.map((event) => (
-                  <EventCard
-                    key={event.seq}
-                    event={event}
-                    compact
-                    decidedApprovals={decided}
-                    onDecided={() => undefined}
-                  />
-                ))}
+                {rows.map((row) =>
+                  row.kind === "work" ? (
+                    <WorkLog
+                      key={`w-${row.key}`}
+                      events={row.events}
+                      decidedApprovals={decided}
+                      onDecided={() => undefined}
+                    />
+                  ) : (
+                    <EventCard
+                      key={row.event.seq}
+                      event={row.event}
+                      compact
+                      decidedApprovals={decided}
+                      onDecided={() => undefined}
+                    />
+                  ),
+                )}
                 {streamText[task.id] ? <StreamingBubble text={streamText[task.id]} /> : null}
                 {active ? <StatusRow status={task.status} /> : null}
                 {task.status === "done" && !events.some((e) => e.type === "task_completed") ? (
@@ -425,20 +499,26 @@ export default function Chat() {
           </div>
         </div>
         <div className="mt-1.5 flex items-center justify-between px-1.5">
-          <select
-            className="max-w-[70%] bg-transparent text-[11px] text-zinc-500 focus:outline-none"
-            value={model}
-            onChange={(e) => setModel(e.target.value)}
+          <button
+            onClick={() => setModelOpen(true)}
+            className="flex items-center gap-1 rounded-full border border-zinc-800 bg-zinc-900/60 px-2.5 py-1 text-[11px] text-zinc-400 transition-colors active:text-zinc-200"
           >
-            {models.map((m) => (
-              <option key={m} value={m} className="bg-zinc-900 text-zinc-200">
-                {m}
-              </option>
-            ))}
-          </select>
+            <span className="h-1.5 w-1.5 rounded-full bg-emerald-500/80" />
+            {prettyModel(model)}
+            <ChevronIcon className="h-3 w-3 -rotate-90 text-zinc-600" />
+          </button>
           <span className="text-[10px] text-zinc-600">Enter to send</span>
         </div>
       </div>
+
+      {modelOpen ? (
+        <ModelSheet
+          models={models}
+          value={model}
+          onSelect={setModel}
+          onClose={() => setModelOpen(false)}
+        />
+      ) : null}
     </div>
   );
 }

@@ -98,8 +98,9 @@ function Shell() {
 }
 
 export default function App() {
+  const base = (import.meta.env.BASE_URL || "/").replace(/\/$/, "") || "/";
   return (
-    <BrowserRouter>
+    <BrowserRouter basename={base}>
       <Shell />
     </BrowserRouter>
   );

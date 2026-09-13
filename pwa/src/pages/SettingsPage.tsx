@@ -247,6 +247,17 @@ export default function SettingsPage() {
                     onChange={(e) => update({ approval_timeout_s: Number(e.target.value) || 0 })}
                   />
                 </div>
+                <div>
+                  <label className="mb-1 block text-[11px] text-zinc-500">Compaction threshold</label>
+                  <input
+                    className={inputBase}
+                    type="number"
+                    value={settings.compaction_threshold_tokens ?? 24000}
+                    onChange={(e) =>
+                      update({ compaction_threshold_tokens: Number(e.target.value) || 0 })
+                    }
+                  />
+                </div>
               </div>
             </div>
           </section>

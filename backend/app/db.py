@@ -50,6 +50,14 @@ async def seed_settings() -> None:
         if row is None:
             session.add(Setting(id=1, data=_default_settings()))
             await session.commit()
+            return
+        # One-time migration: the old default (50) capped long, multi-file tasks.
+        # Only bump it when it still holds the legacy default.
+        data = dict(row.data or {})
+        if data.get("max_iterations") in (None, 50):
+            data["max_iterations"] = _default_settings()["max_iterations"]
+            row.data = data
+            await session.commit()
 
 
 async def save_settings(data: dict) -> None:

@@ -18,8 +18,8 @@ connectors are intentionally out of scope.
 ## Layout
 
 ```
-backend/   FastAPI + agent loop (deploy target: Hugging Face Space, Docker)
-pwa/       React + Vite + Tailwind PWA (deploy target: Cloudflare Pages)
+backend/   FastAPI + agent loop (deploy target: Render/Fly/HF Space, Docker)
+pwa/       React + Vite + Tailwind PWA (deploy target: Render static / GitHub Pages)
 docs/      architecture + API contract
 ```
 
@@ -60,32 +60,43 @@ Copy [`.env.example`](.env.example) to `backend/.env`:
 | `AGENTROUTER_BASE_URL` | OpenAI-compatible base URL, e.g. `https://.../v1` |
 | `AGENTROUTER_API_KEY` | Your agentrouter proxy key |
 | `AGENTROUTER_DEFAULT_MODEL` | Default model id |
+| `BAI_BASE_URL` / `BAI_API_KEY` | Optional secondary OpenAI-compatible provider, routed by model-id prefix |
 | `DATABASE_URL` | `sqlite+aiosqlite:///./app.db` (dev) or `postgresql+asyncpg://...` (prod) |
 | `E2B_API_KEY` | E2B sandbox key |
-| `GITHUB_PAT` | Injected into sandboxes for clone/push/PR. Never logged. |
+| `GITHUB_PAT` | Injected into sandboxes for clone/push/PR and `deploy_site`. Never logged. Add `Pages: write` to publish sites. |
+| `PUBLIC_BASE_URL` | Public origin of the backend (Render auto-sets `RENDER_EXTERNAL_URL`); used for `deploy_site` fallback links |
+| `WORKER_CONCURRENCY` | How many tasks run at once (default 3) |
 | `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` / `VAPID_SUBJECT` | Web Push. Generate with `npx web-push generate-vapid-keys` |
 
 ## Deploying for ₹0
 
-- **Backend** → Hugging Face Space (Docker SDK). The included `backend/Dockerfile` listens on
-  `$PORT`. Add secrets in Space settings. Free CPU Spaces sleep after ~48h idle; keep it warm
-  with a free cron ping (e.g. cron-job.org hitting `/api/health`). The agent loop resumes
-  interrupted tasks from the database on wake.
-- **PWA** → Cloudflare Pages: build command `npm run build`, output directory `dist`.
+- **Backend** → Render free web service (Docker or the included `render.yaml`). Reads `$PORT` and
+  `RENDER_EXTERNAL_URL`. Free instances sleep after ~15 min idle and cold-start in ~1 min; keep it
+  warm with the external cron in [`.github/workflows/keepalive.yml`](.github/workflows/keepalive.yml)
+  (GitHub Actions) or a free pinger like cron-job.org hitting `/api/health`. Point it at your own
+  backend URL before enabling. Interrupted tasks resume from the database on wake.
+- **PWA** → Render static site (`npm run build`, `dist`), or GitHub Pages. Set build env
+  `VITE_API_BASE=https://<backend>` and `VITE_BASE=/<repo>/` when serving from a Pages subpath.
 - **Database** → Neon free Postgres (`DATABASE_URL`).
-- **Sandboxes** → E2B free tier (~100 hrs/month). If you exhaust it, GitHub Actions runners are
-  the documented fallback substrate.
+- **Sandboxes** → E2B free tier (~100 hrs/month).
+- **Published sites** → `deploy_site` exposes the agent's local server through E2B for a live URL,
+  and (optionally) pushes a static copy to GitHub Pages for a persistent URL, with an `/s/{id}`
+  fallback served by the backend.
 
-Point the PWA at the backend by proxying `/api` (Cloudflare Pages redirect/worker or same-origin
-reverse proxy).
+Point the PWA at the backend with `VITE_API_BASE` (the app sends `Authorization` via fetch, so
+cross-origin works with permissive CORS).
 
 ## How a task runs
 
 1. Create a project (GitHub repo) and a task in natural language.
 2. The worker boots an E2B sandbox, clones the repo, and creates branch `agent/<task-id>`.
 3. The agent loops: plan → tool call → observe → fix. Tools include shell, file edit, grep,
-   web fetch, headless browser (with screenshots), git commit/push, and `gh pr create`.
+   web fetch, headless browser (with screenshots), `repo_map` (fast repo orientation), git
+   commit/push, `gh pr create`, and `deploy_site` (publish a page or app and return a URL).
 4. Risky commands hit the permission policy: `auto`, `ask` (pauses the task and pushes an
    approval to your phone), or `deny`.
-5. On success the task opens a PR and reports back. Close the app at any time — the run
-   continues, and the event feed resumes from the database when you reopen it.
+5. Long runs stay cheap: when the model context grows past the compaction threshold it is
+   summarized automatically, and tool output is head+tail truncated. You can `steer` a running
+   task with a new instruction at any time.
+6. On success the task opens a PR (and/or deploys a site) and reports back. Close the app at any
+   time — the run continues, and the event feed resumes from the database when you reopen it.

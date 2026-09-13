@@ -8,6 +8,11 @@ All IDs are UUID strings. Timestamps ISO 8601 UTC.
 ## Health
 - `GET /api/health` → `{ "status": "ok", "version": "1.0.0" }`
 
+## Public
+- `GET /s/{artifact_id}` → HTML (no auth). Serves a single-file site published by
+  the `deploy_site` tool when live/GitHub Pages hosting is unavailable. Used as a
+  fallback persistent URL for generated pages.
+
 ## Projects
 - `GET /api/projects` → `[{ "id", "name", "repo_url", "default_branch", "settings": {}, "created_at" }]`
 - `POST /api/projects` body `{ "repo_url": "https://github.com/o/r", "name"?, "default_branch"? }` → 201 project. `name` defaults to repo name.
@@ -42,10 +47,11 @@ All IDs are UUID strings. Timestamps ISO 8601 UTC.
 ```json
 {
   "default_model": "str",
-  "max_iterations": 50,
+  "max_iterations": 120,
   "token_budget": 2000000,
   "command_timeout_s": 600,
   "approval_timeout_s": 1800,
+  "compaction_threshold_tokens": 24000,
   "permissions": {
     "bash_rules": [
       { "match": "sudo *", "level": "deny" },
@@ -69,10 +75,13 @@ All IDs are UUID strings. Timestamps ISO 8601 UTC.
 - `agent_message`: `{ "content": str }` (assistant text)
 - `tool_call`: `{ "tool": str, "args": object }`
 - `tool_result`: `{ "tool": str, "ok": bool, "summary": str, "truncated": bool }`
-- `terminal`: `{ "command": str, "exit_code": int, "output": str, "truncated": bool }` (output capped ~8000 chars)
+- `terminal`: `{ "command": str, "exit_code": int, "output": str, "truncated": bool }` (head+tail capped ~7500 chars)
 - `screenshot`: `{ "artifact_id": str, "filename": str, "url": "/api/artifacts/{id}" }`
 - `approval_request`: `{ "approval_id": str, "kind": str, "description": str, "payload": object }`
 - `approval_decision`: `{ "approval_id": str, "decision": str }`
+- `steered`: `{ "message": str }` (a mid-run `steer` message was injected)
+- `context_compacted`: `{ "before_messages": int, "after_messages": int, "estimated_tokens_before": int }`
+- `deployed`: `{ "url": str|null, "persistent_url": str|null, "artifact_url": str|null, "title": str, "files": int }` (`url` = live E2B, `persistent_url` = GitHub Pages, `artifact_url` = `/s/{id}` fallback)
 - `task_completed`: `{ "result_summary": str, "pr_url": str|null, "pr_number": int|null, "branch": str|null, "iterations": int, "tokens_used": int }`
 - `task_failed`: `{ "error": str }`
 - `task_stopped`: `{ "reason": str }`

@@ -424,6 +424,23 @@ async def get_artifact(artifact_id: str):
     return Response(content=data, media_type=mime)
 
 
+@public_router.get("/s/{artifact_id}")
+async def serve_site(artifact_id: str):
+    """Unauthenticated fallback host for sites published by deploy_site."""
+    async with SessionLocal() as session:
+        artifact = await session.get(Artifact, artifact_id)
+        if artifact is None:
+            raise HTTPException(status_code=404, detail="site not found")
+        data = artifact.data
+        mime = artifact.mime or "text/html"
+        filename = artifact.filename or "index.html"
+    return Response(
+        content=data,
+        media_type=mime,
+        headers={"Content-Disposition": f'inline; filename="{filename}"'},
+    )
+
+
 # ── approvals ────────────────────────────────────────────
 
 

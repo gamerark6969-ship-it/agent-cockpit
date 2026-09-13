@@ -7,6 +7,8 @@ from e2b.sandbox.commands.command_handle import CommandExitException
 from .config import settings
 
 MAX_OUTPUT_CHARS = 8000
+TRUNCATE_HEAD_CHARS = 5500
+TRUNCATE_TAIL_CHARS = 2000
 REPO_DIR = "/home/user/repo"
 WORK_DIR = "/home/user/work"
 
@@ -48,9 +50,20 @@ def _require_key() -> str:
 
 
 def _truncate(text: str) -> tuple[str, bool]:
-    if len(text) > MAX_OUTPUT_CHARS:
-        return text[:MAX_OUTPUT_CHARS] + "\n... [truncated]", True
-    return text, False
+    """Keep head and tail, elide the middle.
+
+    Errors and summaries usually live at the *end* of command output, so a
+    head-only cut silently hides the most useful information.
+    """
+    if len(text) <= MAX_OUTPUT_CHARS:
+        return text, False
+    elided = len(text) - TRUNCATE_HEAD_CHARS - TRUNCATE_TAIL_CHARS
+    clipped = (
+        text[:TRUNCATE_HEAD_CHARS]
+        + f"\n... [{elided} chars elided] ...\n"
+        + text[-TRUNCATE_TAIL_CHARS:]
+    )
+    return clipped, True
 
 
 def _sh(s: str) -> str:

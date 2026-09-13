@@ -166,10 +166,11 @@ class Permissions(BaseModel):
 
 class SettingsOut(BaseModel):
     default_model: str = "deepseek-v4.1-flash"
-    max_iterations: int = Field(default=50, ge=1)
+    max_iterations: int = Field(default=120, ge=1)
     token_budget: int = Field(default=2000000, ge=1)
     command_timeout_s: int = Field(default=600, ge=1)
     approval_timeout_s: int = Field(default=1800, ge=1)
+    compaction_threshold_tokens: int = Field(default=24000, ge=0)
     permissions: Permissions = Field(default_factory=Permissions)
 
 

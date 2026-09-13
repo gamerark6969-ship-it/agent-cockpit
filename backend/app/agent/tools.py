@@ -124,6 +124,36 @@ TOOL_DEFINITIONS: List[dict] = [
     {
         "type": "function",
         "function": {
+            "name": "repo_map",
+            "description": "Get a compact map of a large repository: file count, language breakdown, directory tree (depth 2), the largest source files by line count, and the README head. Call this first on unfamiliar or big repos instead of listing/reading everything.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "Repo root to map (default: your working directory)"},
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "deploy_site",
+            "description": "Publish a static HTML page or folder from the sandbox to a public URL the user can open on any device. Use this instead of preview_file for HTML pages/sites. Returns a live URL and, when possible, a persistent URL.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "File or directory to publish (default: index.html in your working directory)"},
+                    "title": {"type": "string", "description": "Optional human-friendly title"},
+                    "port": {"type": "integer", "description": "Existing app port to expose instead of serving static files (for fullstack apps already running)"},
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "git_commit",
             "description": "Stage all changes (git add -A) and commit them on the current branch.",
             "parameters": {
@@ -368,6 +398,49 @@ def strip_html(text: str) -> str:
     return text.strip()
 
 
+_REPO_MAP_SCRIPT = r'''
+cd __BASE__ || exit 1
+echo "## overview"
+if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  echo "tracked files: $(git ls-files | wc -l)"
+  echo "tracked lines: $(git ls-files -z | xargs -0 wc -l 2>/dev/null | tail -n 1 | awk '{print $1}')"
+else
+  echo "files: $(find . -type f | wc -l)"
+fi
+echo
+echo "## top level"
+ls -1p | head -60
+echo
+echo "## directories (depth 2)"
+find . -maxdepth 2 -type d \( -name .git -o -name node_modules -o -name .venv -o -name venv -o -name __pycache__ -o -name dist -o -name build -o -name .next \) -prune -o -type d -print 2>/dev/null | sed 's|^\./||' | sort | head -80
+echo
+echo "## largest files (lines)"
+if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  git ls-files -z | xargs -0 wc -l 2>/dev/null | grep -v ' total$' | sort -rn | head -50
+else
+  find . -type d \( -name .git -o -name node_modules -o -name .venv -o -name dist -o -name build \) -prune -o -type f -print0 2>/dev/null | xargs -0 wc -l 2>/dev/null | grep -v ' total$' | sort -rn | head -50
+fi
+echo
+echo "## file types"
+if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  git ls-files | awk -F. 'NF>1{print $NF}' | sort | uniq -c | sort -rn | head -20
+fi
+echo
+echo "## readme"
+for f in README* readme*; do [ -f "$f" ] && { echo "--- $f"; head -50 "$f"; break; }; done
+echo
+echo "## manifests"
+for f in package.json pyproject.toml requirements.txt go.mod Cargo.toml pom.xml; do
+  [ -f "$f" ] && { echo "--- $f"; head -40 "$f"; }
+done
+'''
+
+
+def _repo_map_command(base: str) -> str:
+    return _REPO_MAP_SCRIPT.replace("__BASE__", sbx_mod._sh(base))
+
+
+
 # ── browser support ──────────────────────────────────────
 
 BROWSER_SCRIPT = r'''
@@ -427,7 +500,10 @@ async def _ensure_playwright(ctx: ToolContext) -> Optional[str]:
     probe = await sbx_mod.run_command(sbx, "python -c 'import playwright' 2>/dev/null", timeout=60)
     if probe["exit_code"] == 0:
         return None
-    install_cmd = "pip install --quiet playwright && python -m playwright install chromium --with-deps"
+    install_cmd = (
+        "pip install --quiet playwright && "
+        "(python -m playwright install chromium --only-shell || python -m playwright install chromium --with-deps)"
+    )
     await _emit(
         ctx.task_id,
         "terminal",
@@ -575,6 +651,19 @@ async def _dispatch(ctx: ToolContext, tool: str, args: dict) -> Tuple[bool, str,
         result = await sbx_mod.grep_files(sbx, pattern, path)
         await _emit_terminal(ctx, f"grep -rn {pattern} {path}", result)
         return result["exit_code"] == 0, result["output"], None
+
+    if tool == "repo_map":
+        sbx = await ctx.ensure_sandbox()
+        base = str(args.get("path") or "").strip()
+        base = _repo_path(base, ctx) if base else (ctx.repo_dir or REPO_DIR)
+        result = await sbx_mod.run_command(sbx, _repo_map_command(base), timeout=120)
+        await _emit_terminal(ctx, f"repo_map {base}", result)
+        return result["exit_code"] == 0, result["output"], None
+
+    if tool == "deploy_site":
+        from . import deploy
+
+        return await deploy.deploy_site(ctx, args)
 
     if tool == "git_commit":
         import shlex

@@ -35,8 +35,9 @@ async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, { ...init, headers });
   if (res.status === 401) {
     clearToken();
-    if (window.location.pathname !== "/login") {
-      window.location.assign("/login");
+    const loginPath = `${import.meta.env.BASE_URL || "/"}login`;
+    if (window.location.pathname !== loginPath) {
+      window.location.assign(loginPath);
     }
     throw new ApiError(401, "unauthorized");
   }
@@ -128,6 +129,7 @@ export interface AppSettings {
   token_budget: number;
   command_timeout_s: number;
   approval_timeout_s: number;
+  compaction_threshold_tokens?: number;
   permissions: {
     bash_rules: BashRule[];
     tool_levels?: Record<string, string>;

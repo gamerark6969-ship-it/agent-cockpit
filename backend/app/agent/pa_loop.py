@@ -23,6 +23,7 @@ from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field, create_model
 from pydantic_ai import Agent, CancellationToken, RunContext
+from pydantic_ai.capabilities import ProcessHistory
 from pydantic_ai.exceptions import (
     FallbackExceptionGroup,
     ModelAPIError,
@@ -38,6 +39,8 @@ from pydantic_ai.messages import (
     PartStartEvent,
     TextPart,
     TextPartDelta,
+    ToolCallPart,
+    ToolReturnPart,
     UserPromptPart,
 )
 from pydantic_ai.output import ToolOutput
@@ -66,7 +69,7 @@ from .runtime import (
     _wait_for_approval,
 )
 from .models import PA_DEFAULT_MODEL, build_model_chain
-from .prompts import GENERAL_SYSTEM_PROMPT, SYSTEM_PROMPT
+from .prompts import COMPACTION_PROMPT, GENERAL_SYSTEM_PROMPT, SYSTEM_PROMPT
 from .tools import ToolContext, all_tool_definitions, dispatch
 
 log = logging.getLogger("agent")
@@ -75,6 +78,26 @@ TERMINAL = ("done", "failed", "stopped")
 DELTA_FLUSH_CHARS = 90
 DELTA_FLUSH_SECONDS = 0.25
 MAX_TOOL_SUMMARY = 8000
+SUMMARY_HEAD_CHARS = 5500
+SUMMARY_TAIL_CHARS = 2000
+DEFAULT_MAX_ITERATIONS = 120
+DEFAULT_COMPACTION_THRESHOLD_TOKENS = 24000
+COMPACTION_KEEP_MESSAGES = 6
+CHAT_NUDGE_AFTER = 15
+REPO_NUDGE_AFTER = 25
+MAX_CONCURRENT_TOOLS = 4
+
+
+def _clip_summary(text: str) -> str:
+    """Keep head and tail of a tool result so trailing errors survive."""
+    if len(text) <= MAX_TOOL_SUMMARY:
+        return text
+    elided = len(text) - SUMMARY_HEAD_CHARS - SUMMARY_TAIL_CHARS
+    return (
+        text[:SUMMARY_HEAD_CHARS]
+        + f"\n... [{elided} chars elided] ...\n"
+        + text[-SUMMARY_TAIL_CHARS:]
+    )
 
 
 # ── pydantic-ai plumbing ─────────────────────────────────
@@ -92,6 +115,13 @@ class RunDeps:
     is_chat: bool
     approval_timeout_s: int
     stop_event: asyncio.Event
+    model: Any = None
+    compaction_threshold_tokens: int = DEFAULT_COMPACTION_THRESHOLD_TOKENS
+    nudge_after: int = CHAT_NUDGE_AFTER
+    iteration_count: int = 0
+    compaction_count: int = 0
+    nudged: bool = False
+    live_history: Optional[List[ModelMessage]] = None
 
 
 class FinishResult(BaseModel):
@@ -193,12 +223,13 @@ async def _execute_tool(rc: RunContext[RunDeps], args: BaseModel) -> str:
             deps.ctx.extras["result_summary"] = data["result_summary"]
 
     summary = summary or ""
+    clipped = _clip_summary(summary)
     await _emit(
         deps.task_id,
         "tool_result",
-        {"tool": tool, "ok": bool(ok), "summary": summary[:MAX_TOOL_SUMMARY], "truncated": len(summary) > MAX_TOOL_SUMMARY},
+        {"tool": tool, "ok": bool(ok), "summary": clipped, "truncated": len(clipped) != len(summary)},
     )
-    return summary[:MAX_TOOL_SUMMARY] or "(no output)"
+    return clipped or "(no output)"
 
 
 def _make_tool(defn: Dict[str, Any]):
@@ -246,7 +277,7 @@ class _DeltaStream:
         await _emit(self.task_id, "agent_delta", {"content": text})
 
 
-async def _prior_turns(project_id: str, exclude_task_id: str, max_turns: int = 40) -> List[ModelMessage]:
+async def _prior_turns(project_id: str, exclude_task_id: str, max_turns: int = 12) -> List[ModelMessage]:
     """Prior completed turns in a chat thread, as plain user/assistant text."""
     from sqlalchemy import select
 
@@ -264,10 +295,10 @@ async def _prior_turns(project_id: str, exclude_task_id: str, max_turns: int = 4
     for t in tasks:
         prompt = (t.prompt or "").strip()
         if prompt:
-            history.append(ModelRequest(parts=[UserPromptPart(content=prompt[:4000])]))
+            history.append(ModelRequest(parts=[UserPromptPart(content=prompt[:1500])]))
         final = (t.result_summary or "").strip()
         if final:
-            history.append(ModelResponse(parts=[TextPart(content=final[:4000])]))
+            history.append(ModelResponse(parts=[TextPart(content=final[:1500])]))
     return history[-max_turns:]
 
 
@@ -289,6 +320,129 @@ async def _sync_answering_model(task_id: str, resp: ModelResponse, current: str)
         await _update_task(task_id, model=actual)
         return actual
     return current
+
+
+# ── context hygiene: steering, wrap-up nudge, compaction ─
+
+
+def _estimate_tokens(messages: List[ModelMessage]) -> int:
+    try:
+        raw = ModelMessagesTypeAdapter.dump_json(messages)
+    except Exception:
+        return 0
+    return len(raw) // 4
+
+
+def _render_transcript(messages: List[ModelMessage]) -> str:
+    lines: List[str] = []
+    for msg in messages:
+        if isinstance(msg, ModelRequest):
+            for part in msg.parts:
+                if isinstance(part, UserPromptPart):
+                    content = part.content
+                    text = content if isinstance(content, str) else json.dumps(content, default=str)
+                    lines.append(f"USER: {text}")
+                elif isinstance(part, ToolReturnPart):
+                    content = part.content
+                    text = content if isinstance(content, str) else json.dumps(content, default=str)
+                    lines.append(f"TOOL {part.tool_name} result: {text}")
+        elif isinstance(msg, ModelResponse):
+            for part in msg.parts:
+                if isinstance(part, TextPart) and part.content.strip():
+                    lines.append(f"ASSISTANT: {part.content}")
+                elif isinstance(part, ToolCallPart):
+                    lines.append(
+                        f"ASSISTANT called {part.tool_name}({json.dumps(part.args, default=str)})"
+                    )
+    return "\n".join(lines)
+
+
+async def _summarize_history(deps: RunDeps, messages: List[ModelMessage]) -> Optional[str]:
+    transcript = _render_transcript(messages)
+    if not transcript.strip():
+        return None
+    agent: Agent[None, str] = Agent(deps.model, output_type=str)
+    try:
+        result = await agent.run(f"{COMPACTION_PROMPT}\n\n--- CONVERSATION ---\n{transcript}")
+    except Exception:
+        log.warning("history compaction failed for %s", deps.task_id, exc_info=True)
+        return None
+    return str(result.output or "").strip() or None
+
+
+def _trim_dangling_tool_returns(messages: List[ModelMessage]) -> List[ModelMessage]:
+    i = 0
+    while i < len(messages):
+        m = messages[i]
+        if isinstance(m, ModelRequest) and any(isinstance(p, ToolReturnPart) for p in m.parts):
+            i += 1
+            continue
+        break
+    return messages[i:] or messages[-1:]
+
+
+async def _compact_messages(deps: RunDeps, messages: List[ModelMessage]) -> List[ModelMessage]:
+    if deps.compaction_threshold_tokens <= 0 or len(messages) <= COMPACTION_KEEP_MESSAGES:
+        return messages
+    est = _estimate_tokens(messages)
+    if est < deps.compaction_threshold_tokens:
+        return messages
+    summary = await _summarize_history(deps, messages)
+    if not summary:
+        return messages
+    keep = _trim_dangling_tool_returns(list(messages[-COMPACTION_KEEP_MESSAGES:]))
+    compacted = [
+        ModelRequest(parts=[UserPromptPart(content=f"[Summary of earlier work]\n{summary}")])
+    ] + keep
+    deps.compaction_count += 1
+    deps.live_history = compacted
+    await _emit(
+        deps.task_id,
+        "context_compacted",
+        {
+            "before_messages": len(messages),
+            "after_messages": len(compacted),
+            "estimated_tokens_before": est,
+        },
+    )
+    log.info(
+        "compacted history for %s: %d -> %d messages (~%d tokens)",
+        deps.task_id,
+        len(messages),
+        len(compacted),
+        est,
+    )
+    return compacted
+
+
+async def _history_processor(
+    ctx: RunContext[RunDeps], messages: List[ModelMessage]
+) -> List[ModelMessage]:
+    """Runs before every model request: inject steering + nudge, then compact."""
+    deps = ctx.deps
+    injected: List[ModelMessage] = []
+
+    for text in deps.worker.drain_steer(deps.task_id):
+        text = (text or "").strip()
+        if not text:
+            continue
+        injected.append(ModelRequest(parts=[UserPromptPart(content=f"[User update] {text}")]))
+        await _emit(deps.task_id, "steered", {"message": _clip_summary(text)})
+
+    if not deps.nudged and deps.iteration_count >= deps.nudge_after:
+        deps.nudged = True
+        nudge = (
+            "You have been working for a while. If the user's request is satisfied, call the "
+            "finish tool now with the answer. Only continue if something is genuinely still missing."
+            if deps.is_chat
+            else
+            "You have been working for a while. Stop exploratory verification and wrap up: commit, "
+            "push, open the PR if appropriate, then call the finish tool with the result summary."
+        )
+        injected.append(ModelRequest(parts=[UserPromptPart(content=f"[System reminder] {nudge}")]))
+
+    combined = messages + injected if injected else messages
+    return await _compact_messages(deps, combined)
 
 
 # ── the loop ─────────────────────────────────────────────
@@ -314,10 +468,13 @@ async def run_agent_loop(task_id: str, worker) -> None:
     is_chat = (project.kind or "repo") == "chat"
     resume = task.status in ("running", "awaiting_approval")
     model_name = str(task.model or settings_data.get("default_model") or PA_DEFAULT_MODEL)
-    max_iterations = int(settings_data.get("max_iterations") or 50)
+    max_iterations = int(settings_data.get("max_iterations") or DEFAULT_MAX_ITERATIONS)
     token_budget = int(settings_data.get("token_budget") or 2_000_000)
     command_timeout_s = int(settings_data.get("command_timeout_s") or 600)
     approval_timeout_s = int(settings_data.get("approval_timeout_s") or 1800)
+    compaction_threshold = int(
+        settings_data.get("compaction_threshold_tokens") or DEFAULT_COMPACTION_THRESHOLD_TOKENS
+    )
 
     model = build_model_chain(model_name)
     if model is None:
@@ -419,7 +576,9 @@ async def run_agent_loop(task_id: str, worker) -> None:
                 str,
             ],
             tools=[_make_tool(d) for d in tool_defs],
+            capabilities=[ProcessHistory(_history_processor)],
             end_strategy="graceful",
+            max_concurrency=MAX_CONCURRENT_TOOLS,
         )
 
         deps = RunDeps(
@@ -429,6 +588,9 @@ async def run_agent_loop(task_id: str, worker) -> None:
             is_chat=is_chat,
             approval_timeout_s=approval_timeout_s,
             stop_event=stop_event,
+            model=model,
+            compaction_threshold_tokens=compaction_threshold,
+            nudge_after=CHAT_NUDGE_AFTER if is_chat else REPO_NUDGE_AFTER,
         )
 
         # bridge the worker stop_event to pydantic-ai's cancellation token
@@ -475,6 +637,7 @@ async def run_agent_loop(task_id: str, worker) -> None:
                         elif Agent.is_call_tools_node(node):
                             resp = node.model_response
                             iterations += 1
+                            deps.iteration_count = iterations
                             usage = getattr(resp, "usage", None)
                             if usage is not None:
                                 tokens_used += int(getattr(usage, "input_tokens", 0) or 0) + int(
@@ -539,10 +702,12 @@ async def run_agent_loop(task_id: str, worker) -> None:
             except Exception:
                 log.debug("final delta flush failed for %s", task_id, exc_info=True)
 
-        # persist the conversation so a restart can resume it
-        if final_messages:
+        # persist the conversation so a restart can resume it. When we compacted
+        # mid-run, persist the compacted (small) view instead of the full trace.
+        to_persist = deps.live_history if (deps.compaction_count and deps.live_history) else final_messages
+        if to_persist:
             try:
-                serialized = json.loads(ModelMessagesTypeAdapter.dump_json(final_messages))
+                serialized = json.loads(ModelMessagesTypeAdapter.dump_json(to_persist))
                 await _update_task(task_id, pa_history=serialized)
             except Exception:
                 log.warning("failed to persist pa_history for %s", task_id, exc_info=True)
