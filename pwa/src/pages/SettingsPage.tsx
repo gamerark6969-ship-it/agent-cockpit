@@ -125,7 +125,7 @@ export default function SettingsPage() {
 
   if (loading) {
     return (
-      <div className="flex justify-center py-16 text-zinc-500">
+      <div className="flex justify-center py-16 text-faint">
         <Spinner />
       </div>
     );
@@ -134,17 +134,17 @@ export default function SettingsPage() {
   return (
     <div className="safe-top flex flex-col gap-4 px-4 pb-nav pt-5">
       <header>
-        <h1 className="text-2xl font-bold tracking-tight text-zinc-50">Settings</h1>
-        <p className="mt-0.5 text-xs text-zinc-500">Models, permissions, and notifications</p>
+        <h1 className="text-xl font-semibold tracking-tight text-fg">Settings</h1>
+        <p className="mt-0.5 text-[13px] text-faint">Models, permissions, and notifications</p>
       </header>
 
       {message ? (
-        <p className="animate-fade-in rounded-2xl border border-emerald-900/60 bg-emerald-950/20 px-4 py-2.5 text-xs text-emerald-300">
+        <p className="animate-fade-in rounded-xl border border-line bg-surface px-3.5 py-2.5 text-xs text-muted">
           {message}
         </p>
       ) : null}
       {error ? (
-        <p className="animate-fade-in rounded-2xl border border-red-900/60 bg-red-950/20 px-4 py-2.5 text-xs text-red-300">
+        <p className="animate-fade-in rounded-xl border border-red-950 bg-red-950/25 px-3.5 py-2.5 text-xs text-del">
           {error}
         </p>
       ) : null}
@@ -165,7 +165,7 @@ export default function SettingsPage() {
           </button>
         </div>
         <button
-          className="mt-3 text-xs text-zinc-500"
+          className="mt-3 text-xs text-faint"
           onClick={() => {
             clearToken();
             navigate("/login", { replace: true });
@@ -177,13 +177,13 @@ export default function SettingsPage() {
 
       <section className={card}>
         <p className={label}>Notifications</p>
-        <p className="mt-1.5 text-xs text-zinc-500">
+        <p className="mt-1.5 text-xs text-faint">
           Push support: {pushSupported() ? "available" : "unavailable"} · permission: {permission}
         </p>
-        <p className="mt-1 break-all text-[11px] text-zinc-600">
+        <p className="mt-1 break-all font-mono text-[11px] text-faint">
           VAPID key: {vapidKey || "not configured on server"}
         </p>
-        {pushMessage ? <p className="mt-2 text-xs text-zinc-400">{pushMessage}</p> : null}
+        {pushMessage ? <p className="mt-2 text-xs text-muted">{pushMessage}</p> : null}
         <button
           className={`${btnPrimary} mt-3`}
           disabled={enablingPush}
@@ -192,7 +192,7 @@ export default function SettingsPage() {
           {enablingPush ? <Spinner className="h-4 w-4" /> : null}
           Enable notifications on this device
         </button>
-        <p className="mt-2 text-[11px] text-zinc-600">
+        <p className="mt-2 text-[11px] text-faint">
           On iOS, add this app to your home screen first (Share → Add to Home Screen).
         </p>
       </section>
@@ -203,7 +203,7 @@ export default function SettingsPage() {
             <p className={label}>Agent defaults</p>
             <div className="mt-3 flex flex-col gap-3">
               <div>
-                <label className="mb-1 block text-[11px] text-zinc-500">Default model</label>
+                <label className="mb-1 block text-[11px] text-faint">Default model</label>
                 <input
                   className={inputBase}
                   value={settings.default_model}
@@ -212,7 +212,7 @@ export default function SettingsPage() {
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="mb-1 block text-[11px] text-zinc-500">Max iterations</label>
+                  <label className="mb-1 block text-[11px] text-faint">Max iterations</label>
                   <input
                     className={inputBase}
                     type="number"
@@ -221,7 +221,7 @@ export default function SettingsPage() {
                   />
                 </div>
                 <div>
-                  <label className="mb-1 block text-[11px] text-zinc-500">Token budget</label>
+                  <label className="mb-1 block text-[11px] text-faint">Token budget</label>
                   <input
                     className={inputBase}
                     type="number"
@@ -230,7 +230,7 @@ export default function SettingsPage() {
                   />
                 </div>
                 <div>
-                  <label className="mb-1 block text-[11px] text-zinc-500">Command timeout (s)</label>
+                  <label className="mb-1 block text-[11px] text-faint">Command timeout (s)</label>
                   <input
                     className={inputBase}
                     type="number"
@@ -239,7 +239,7 @@ export default function SettingsPage() {
                   />
                 </div>
                 <div>
-                  <label className="mb-1 block text-[11px] text-zinc-500">Approval timeout (s)</label>
+                  <label className="mb-1 block text-[11px] text-faint">Approval timeout (s)</label>
                   <input
                     className={inputBase}
                     type="number"
@@ -248,7 +248,7 @@ export default function SettingsPage() {
                   />
                 </div>
                 <div>
-                  <label className="mb-1 block text-[11px] text-zinc-500">Compaction threshold</label>
+                  <label className="mb-1 block text-[11px] text-faint">Compaction threshold</label>
                   <input
                     className={inputBase}
                     type="number"
@@ -267,13 +267,13 @@ export default function SettingsPage() {
               <p className={label}>Command permission rules</p>
               <button
                 onClick={addRule}
-                className="flex h-8 w-8 items-center justify-center rounded-lg border border-zinc-800 text-zinc-400 active:bg-zinc-800"
+                className="flex h-8 w-8 items-center justify-center rounded-lg border border-line bg-surface text-muted active:bg-hover"
                 aria-label="Add rule"
               >
                 <PlusIcon className="h-4 w-4" />
               </button>
             </div>
-            <p className="mt-1.5 text-[11px] text-zinc-600">
+            <p className="mt-1.5 text-[11px] text-faint">
               First matching glob wins. Commands with no match default to auto.
             </p>
             <div className="mt-3 flex flex-col gap-2">
@@ -286,7 +286,7 @@ export default function SettingsPage() {
                     onChange={(e) => updateRule(index, { match: e.target.value })}
                   />
                   <select
-                    className="h-10 shrink-0 rounded-xl border border-zinc-800 bg-zinc-900 px-2 text-xs text-zinc-200"
+                    className="h-10 shrink-0 rounded-xl border border-line bg-surface px-2 text-xs text-fg"
                     value={rule.level}
                     onChange={(e) =>
                       updateRule(index, { level: e.target.value as BashRule["level"] })
@@ -298,7 +298,7 @@ export default function SettingsPage() {
                   </select>
                   <button
                     onClick={() => removeRule(index)}
-                    className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-zinc-600 active:bg-zinc-800 active:text-red-400"
+                    className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-faint active:bg-hover active:text-del"
                     aria-label="Remove rule"
                   >
                     <TrashIcon className="h-4 w-4" />

@@ -17,7 +17,7 @@ import { streamTaskEvents, type StreamHandle } from "../lib/sse";
 import EventCard, { WorkLog, groupFeed } from "../components/EventCard";
 import Spinner from "../components/Spinner";
 import Markdown from "../components/Markdown";
-import { CheckIcon, ChevronIcon, SendIcon, StopIcon } from "../components/Icons";
+import { ArrowUpIcon, CheckIcon, ChevronIcon, StopIcon } from "../components/Icons";
 
 const TERMINAL: TaskStatus[] = ["done", "failed", "stopped"];
 const FALLBACK_MODELS = ["deepseek-v4.1-flash"];
@@ -44,14 +44,14 @@ function ModelSheet({
   onClose: () => void;
 }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-end bg-black/60" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-end bg-black/70" onClick={onClose}>
       <div
-        className="safe-bottom w-full rounded-t-3xl border-t border-zinc-800 bg-zinc-950 px-4 pt-3"
+        className="safe-bottom w-full rounded-t-2xl border-t border-line bg-surface px-4 pt-3"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-zinc-700" />
-        <p className="mb-3 px-1 text-xs font-semibold uppercase tracking-wide text-zinc-500">Model</p>
-        <div className="flex flex-col gap-1.5 pb-5">
+        <div className="mx-auto mb-4 h-1 w-9 rounded-full bg-line-strong" />
+        <p className="mb-3 px-1 text-xs font-semibold uppercase tracking-wide text-faint">Model</p>
+        <div className="flex flex-col gap-1 pb-5">
           {models.map((m) => (
             <button
               key={m}
@@ -61,15 +61,15 @@ function ModelSheet({
               }}
               className={`flex h-12 items-center justify-between rounded-xl border px-3.5 text-left text-sm transition-colors ${
                 m === value
-                  ? "border-emerald-700/60 bg-emerald-950/30 text-emerald-200"
-                  : "border-zinc-800 bg-zinc-900/50 text-zinc-300 active:bg-zinc-800"
+                  ? "border-line-strong bg-elevated text-fg"
+                  : "border-transparent text-muted active:bg-hover"
               }`}
             >
               <span className="flex flex-col">
                 <span className="font-medium">{prettyModel(m)}</span>
-                <span className="font-mono text-[10px] text-zinc-500">{m}</span>
+                <span className="font-mono text-[10px] text-faint">{m}</span>
               </span>
-              {m === value ? <CheckIcon className="h-4 w-4 text-emerald-400" /> : null}
+              {m === value ? <CheckIcon className="h-4 w-4 text-fg" /> : null}
             </button>
           ))}
         </div>
@@ -80,30 +80,21 @@ function ModelSheet({
 
 const str = (v: unknown, fallback = ""): string => (typeof v === "string" ? v : fallback);
 
-function UserBubble({ text }: { text: string }) {
+function UserMessage({ text }: { text: string }) {
   return (
     <div className="flex justify-end">
-      <div className="max-w-[85%] whitespace-pre-wrap rounded-3xl rounded-br-lg bg-emerald-600 px-4 py-2.5 text-sm leading-relaxed text-white">
+      <div className="max-w-[85%] whitespace-pre-wrap rounded-2xl border border-line bg-elevated px-3.5 py-2.5 text-[15px] leading-relaxed text-fg">
         {text}
       </div>
     </div>
   );
 }
 
-function AssistantBubble({ text }: { text: string }) {
-  if (!text.trim()) return null;
-  return (
-    <div className="max-w-[92%] rounded-3xl rounded-tl-lg border border-zinc-800/80 bg-zinc-900/60 px-4 py-2.5">
-      <Markdown text={text} />
-    </div>
-  );
-}
-
 function StreamingBubble({ text }: { text: string }) {
   return (
-    <div className="max-w-[92%] rounded-3xl rounded-tl-lg border border-zinc-800/80 bg-zinc-900/60 px-4 py-2.5">
+    <div className="max-w-full">
       <Markdown text={text} />
-      <span className="ml-0.5 inline-block h-4 w-1.5 translate-y-0.5 animate-pulse rounded-sm bg-emerald-400" />
+      <span className="ml-0.5 inline-block h-4 w-1.5 translate-y-0.5 animate-pulse rounded-sm bg-muted" />
     </div>
   );
 }
@@ -116,7 +107,7 @@ function StatusRow({ status }: { status: TaskStatus }) {
         ? "Waiting for approval…"
         : "Working…";
   return (
-    <div className="flex items-center gap-2 px-1 text-xs text-zinc-500">
+    <div className="flex items-center gap-2 px-0.5 text-xs text-faint">
       <Spinner className="h-3.5 w-3.5" /> {label}
     </div>
   );
@@ -260,8 +251,6 @@ export default function Chat() {
 
   useEffect(() => {
     if (!anyActive) return;
-    // SSE keeps the feed live; we only reconcile task statuses when the tab
-    // regains focus (cheap, and avoids the old 4s polling loop).
     const onFocus = () => {
       if (document.visibilityState === "visible") void refreshTasks().catch(() => undefined);
     };
@@ -343,7 +332,7 @@ export default function Chat() {
 
   if (loading) {
     return (
-      <div className="flex justify-center py-16 text-zinc-500">
+      <div className="flex justify-center py-16 text-faint">
         <Spinner />
       </div>
     );
@@ -352,43 +341,37 @@ export default function Chat() {
   if (!project) {
     return (
       <div className="px-4 pt-6">
-        <p className="text-sm text-red-400">{error || "chat not found"}</p>
+        <p className="text-sm text-del">{error || "chat not found"}</p>
       </div>
     );
   }
 
   return (
     <div className="safe-top flex h-dvh flex-col">
-      <header className="flex items-center gap-2 border-b border-zinc-800/60 px-3 py-2.5">
+      <header className="flex items-center gap-1.5 border-b border-line px-2.5 py-2">
         <Link
           to="/"
-          className="flex h-9 w-9 items-center justify-center rounded-full text-zinc-400 transition-colors active:bg-zinc-800 active:text-zinc-100"
+          className="flex h-9 w-9 items-center justify-center rounded-lg text-muted transition-colors active:bg-hover active:text-fg"
           aria-label="Back"
         >
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-5 w-5">
             <path strokeLinecap="round" strokeLinejoin="round" d="m15 6-6 6 6 6" />
           </svg>
         </Link>
-        <h1 className="min-w-0 flex-1 truncate text-[15px] font-semibold text-zinc-100">
-          {project.name}
-        </h1>
+        <h1 className="min-w-0 flex-1 truncate text-[15px] font-medium text-fg">{project.name}</h1>
         {anyActive ? (
-          <span className="flex shrink-0 items-center gap-1.5 rounded-full bg-emerald-500/10 px-2.5 py-1 text-[11px] font-medium text-emerald-400">
-            <span className="pulse-dot h-1.5 w-1.5 rounded-full bg-emerald-400" />
+          <span className="flex shrink-0 items-center gap-1.5 pr-1.5 text-[11px] font-medium text-muted">
+            <span className="pulse-dot h-1.5 w-1.5 rounded-full bg-add" />
             live
           </span>
         ) : null}
       </header>
 
-      <div
-        ref={feedRef}
-        onScroll={onScroll}
-        className="flex flex-1 flex-col gap-4 overflow-y-auto px-3 py-4"
-      >
+      <div ref={feedRef} onScroll={onScroll} className="flex flex-1 flex-col gap-5 overflow-y-auto px-4 py-5">
         {tasks.length === 0 ? (
           <div className="flex flex-1 flex-col items-center justify-center gap-3 py-16 text-center">
-            <div className="flex h-14 w-14 items-center justify-center rounded-3xl bg-emerald-500/10 text-emerald-400 ring-1 ring-emerald-500/20">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-7 w-7">
+            <div className="flex h-12 w-12 items-center justify-center rounded-xl border border-line bg-surface text-muted">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-6 w-6">
                 <path
                   strokeLinecap="round"
                   strokeLinejoin="round"
@@ -396,8 +379,8 @@ export default function Chat() {
                 />
               </svg>
             </div>
-            <p className="text-base font-semibold text-zinc-300">Ask me anything</p>
-            <p className="max-w-xs text-xs leading-relaxed text-zinc-500">
+            <p className="text-[15px] font-medium text-fg">Ask me anything</p>
+            <p className="max-w-xs text-[13px] leading-relaxed text-faint">
               I can build and preview files, search the web, read and send email, use GitHub, and
               more.
             </p>
@@ -410,8 +393,8 @@ export default function Chat() {
             const rows = groupFeed(events);
             const active = !TERMINAL.includes(task.status);
             return (
-              <div key={task.id} className="flex flex-col gap-2.5">
-                <UserBubble text={task.prompt} />
+              <div key={task.id} className="flex flex-col gap-3">
+                <UserMessage text={task.prompt} />
                 {rows.map((row) =>
                   row.kind === "work" ? (
                     <WorkLog
@@ -432,22 +415,24 @@ export default function Chat() {
                 )}
                 {streamText[task.id] ? <StreamingBubble text={streamText[task.id]} /> : null}
                 {active ? <StatusRow status={task.status} /> : null}
-                {task.status === "done" && !events.some((e) => e.type === "task_completed") ? (
-                  <AssistantBubble text={task.result_summary || ""} />
+                {task.status === "done" &&
+                !events.some((e) => e.type === "task_completed") &&
+                task.result_summary ? (
+                  <div className="max-w-full">
+                    <Markdown text={task.result_summary} />
+                  </div>
                 ) : null}
                 {task.status === "failed" && !events.some((e) => e.type === "task_failed") ? (
-                  <div className="rounded-2xl border border-red-800/70 bg-red-950/25 px-4 py-3">
-                    <p className="text-xs font-semibold uppercase tracking-wide text-red-300">
-                      Failed
-                    </p>
-                    <p className="mt-1 whitespace-pre-wrap text-sm text-zinc-300">
+                  <div className="rounded-xl border border-red-950 bg-red-950/30 px-3.5 py-3">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-del">Failed</p>
+                    <p className="mt-1 whitespace-pre-wrap text-sm text-muted">
                       {task.error || "the agent hit an error"}
                     </p>
                   </div>
                 ) : null}
                 {task.status === "stopped" && !events.some((e) => e.type === "task_stopped") ? (
-                  <div className="rounded-2xl border border-zinc-700 bg-zinc-900/60 px-4 py-2.5">
-                    <p className="text-xs text-zinc-400">Stopped</p>
+                  <div className="rounded-xl border border-line bg-surface px-3.5 py-2.5">
+                    <p className="text-xs text-muted">Stopped</p>
                   </div>
                 ) : null}
               </div>
@@ -457,57 +442,54 @@ export default function Chat() {
       </div>
 
       {error ? (
-        <p className="mx-3 mb-1 rounded-xl border border-red-900/60 bg-red-950/20 px-3 py-2 text-xs text-red-300">
+        <p className="mx-4 mb-1 rounded-xl border border-red-950 bg-red-950/30 px-3.5 py-2 text-xs text-del">
           {error}
         </p>
       ) : null}
 
-      <div className="safe-bottom border-t border-zinc-800/60 bg-zinc-950/90 px-3 py-2.5 backdrop-blur">
-        <div className="flex items-end gap-2">
-          <div className="glass flex min-h-11 flex-1 items-end rounded-3xl border border-zinc-800/80 pl-3.5 pr-1 py-1">
-            <textarea
-              className="max-h-32 min-h-9 flex-1 resize-none bg-transparent py-1.5 text-[15px] text-zinc-100 placeholder-zinc-600 focus:outline-none"
-              placeholder="Message the agent…"
-              rows={1}
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault();
-                  void send();
-                }
-              }}
-            />
-            {anyActive ? (
-              <button
-                className="mb-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-red-700/90 text-white transition-transform active:scale-95"
-                onClick={() => void doStop()}
-                aria-label="Stop"
-              >
-                <StopIcon className="h-4 w-4" />
-              </button>
-            ) : (
-              <button
-                className="mb-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-b from-emerald-500 to-emerald-600 text-white shadow-lg shadow-emerald-950/40 transition-transform active:scale-95 disabled:opacity-40 disabled:shadow-none"
-                disabled={busy || !input.trim()}
-                onClick={() => void send()}
-                aria-label="Send"
-              >
-                {busy ? <Spinner className="h-4 w-4" /> : <SendIcon className="h-4 w-4" />}
-              </button>
-            )}
-          </div>
+      <div className="safe-bottom border-t border-line bg-canvas px-3 py-2.5">
+        <div className="flex items-end gap-2 rounded-2xl border border-line bg-surface p-1.5 pl-3.5 transition-colors focus-within:border-line-strong">
+          <textarea
+            className="max-h-32 min-h-9 flex-1 resize-none bg-transparent py-2 text-[15px] leading-relaxed text-fg placeholder-faint focus:outline-none"
+            placeholder="Ask the agent…"
+            rows={1}
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                void send();
+              }
+            }}
+          />
+          {anyActive ? (
+            <button
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-line bg-elevated text-muted transition-colors active:bg-hover active:text-fg"
+              onClick={() => void doStop()}
+              aria-label="Stop"
+            >
+              <StopIcon className="h-3.5 w-3.5" />
+            </button>
+          ) : (
+            <button
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-accent text-canvas transition-colors active:bg-white disabled:opacity-30"
+              disabled={busy || !input.trim()}
+              onClick={() => void send()}
+              aria-label="Send"
+            >
+              {busy ? <Spinner className="h-4 w-4" /> : <ArrowUpIcon className="h-4 w-4" />}
+            </button>
+          )}
         </div>
-        <div className="mt-1.5 flex items-center justify-between px-1.5">
+        <div className="mt-1.5 flex items-center justify-between px-1">
           <button
             onClick={() => setModelOpen(true)}
-            className="flex items-center gap-1 rounded-full border border-zinc-800 bg-zinc-900/60 px-2.5 py-1 text-[11px] text-zinc-400 transition-colors active:text-zinc-200"
+            className="flex items-center gap-1.5 rounded-lg px-1.5 py-1 font-mono text-[11px] text-faint transition-colors active:text-muted"
           >
-            <span className="h-1.5 w-1.5 rounded-full bg-emerald-500/80" />
             {prettyModel(model)}
-            <ChevronIcon className="h-3 w-3 -rotate-90 text-zinc-600" />
+            <ChevronIcon className="h-3 w-3 rotate-90 text-faint" />
           </button>
-          <span className="text-[10px] text-zinc-600">Enter to send</span>
+          <span className="hidden text-[10px] text-faint sm:block">Enter to send</span>
         </div>
       </div>
 

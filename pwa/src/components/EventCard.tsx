@@ -14,7 +14,7 @@ const bool = (v: unknown): boolean => v === true;
 function AgentBubble({ content }: { content: string }) {
   if (!content.trim()) return null;
   return (
-    <div className="rounded-2xl rounded-tl-sm border border-zinc-800 border-l-2 border-l-emerald-600/70 bg-zinc-900/60 px-3.5 py-2.5">
+    <div className="border-l border-line-strong pl-3.5">
       <Markdown text={content} />
     </div>
   );
@@ -22,16 +22,16 @@ function AgentBubble({ content }: { content: string }) {
 
 function ToolCall({ tool, args }: { tool: string; args: unknown }) {
   return (
-    <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 px-3 py-2">
+    <div className="rounded-xl border border-line bg-surface px-3 py-2">
       <div className="flex items-center gap-2 text-xs">
-        <CodeIcon className="h-4 w-4 text-blue-400" />
-        <span className="font-mono text-blue-300">{tool}</span>
+        <CodeIcon className="h-4 w-4 text-muted" />
+        <span className="font-mono text-muted">{tool}</span>
       </div>
       <details className="mt-1">
-        <summary className="cursor-pointer select-none text-[11px] text-zinc-500 hover:text-zinc-400">
+        <summary className="cursor-pointer select-none text-[11px] text-faint hover:text-muted">
           arguments
         </summary>
-        <pre className="mt-1 max-h-64 overflow-auto rounded-lg bg-black/50 p-2 text-[11px] leading-relaxed text-zinc-400">
+        <pre className="mt-1 max-h-64 overflow-auto rounded-lg bg-black/50 p-2 text-[11px] leading-relaxed text-muted">
           {prettyJson(args)}
         </pre>
       </details>
@@ -46,12 +46,12 @@ function CompactToolRow({ tool, ok, summary }: { tool: string; ok: boolean; summ
     <div className="py-0.5">
       <button
         onClick={() => setOpen((v) => !v)}
-        className="flex w-full items-center gap-2 py-1 text-left text-[11px] text-zinc-500 transition-colors active:text-zinc-300"
+        className="flex w-full items-center gap-2 py-1 text-left text-[11px] text-faint transition-colors active:text-muted"
       >
         {ok ? (
-          <CheckIcon className="h-3 w-3 shrink-0 text-emerald-500/70" />
+          <CheckIcon className="h-3 w-3 shrink-0 text-add" />
         ) : (
-          <XIcon className="h-3 w-3 shrink-0 text-red-500/70" />
+          <XIcon className="h-3 w-3 shrink-0 text-del" />
         )}
         <span className="shrink-0 font-mono">{tool}</span>
         {firstLine ? <span className="min-w-0 flex-1 truncate">{firstLine}</span> : null}
@@ -60,7 +60,7 @@ function CompactToolRow({ tool, ok, summary }: { tool: string; ok: boolean; summ
         />
       </button>
       {open && summary ? (
-        <pre className="mt-1 max-h-56 overflow-auto rounded-lg bg-black/50 p-2 text-[11px] leading-relaxed text-zinc-400">
+        <pre className="mt-1 max-h-56 overflow-auto rounded-lg bg-black/50 p-2 text-[11px] leading-relaxed text-muted">
           {truncate(summary, 1500)}
         </pre>
       ) : null}
@@ -82,20 +82,20 @@ function ToolResult({
   return (
     <div
       className={`rounded-xl border px-3 py-2 ${
-        ok ? "border-emerald-900/60 bg-emerald-950/20" : "border-red-900/60 bg-red-950/20"
+        ok ? "border-line bg-surface" : "border-red-950 bg-red-950/25"
       }`}
     >
       <div className="flex items-center gap-2 text-xs">
         {ok ? (
-          <CheckIcon className="h-3.5 w-3.5 text-emerald-400" />
+          <CheckIcon className="h-3.5 w-3.5 text-add" />
         ) : (
-          <XIcon className="h-3.5 w-3.5 text-red-400" />
+          <XIcon className="h-3.5 w-3.5 text-del" />
         )}
-        <span className="font-mono text-zinc-300">{tool}</span>
-        {wasTruncated ? <span className="text-[10px] text-zinc-500">truncated</span> : null}
+        <span className="font-mono text-fg">{tool}</span>
+        {wasTruncated ? <span className="text-[10px] text-faint">truncated</span> : null}
       </div>
       {summary ? (
-        <p className="mt-1 whitespace-pre-wrap break-words text-[12px] leading-relaxed text-zinc-400">
+        <p className="mt-1 whitespace-pre-wrap break-words text-[12px] leading-relaxed text-muted">
           {truncate(summary, 1500)}
         </p>
       ) : null}
@@ -120,28 +120,26 @@ function TerminalBlock({
   const shown = collapsible && !expanded ? lines.slice(0, 10).join("\n") : output;
   const ok = exitCode === 0;
   return (
-    <div className="overflow-hidden rounded-xl border border-zinc-800/80 bg-black/60">
+    <div className="overflow-hidden rounded-xl border border-line bg-black">
       <button
         onClick={() => setExpanded((v) => !v)}
-        className="flex w-full items-center gap-2 border-b border-zinc-800/60 bg-zinc-900/40 px-3 py-1.5 text-left"
+        className="flex w-full items-center gap-2 bg-surface px-3 py-1.5 text-left"
       >
-        <span className="font-mono text-[11px] text-zinc-500">$</span>
-        <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-zinc-300">
-          {command}
-        </span>
+        <span className="font-mono text-[11px] text-faint">$</span>
+        <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-fg">{command}</span>
         <span
-          className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${
-            ok ? "bg-emerald-950 text-emerald-400" : "bg-red-950 text-red-400"
+          className={`rounded px-1.5 py-0.5 font-mono text-[10px] font-semibold ${
+            ok ? "bg-elevated text-muted" : "bg-red-950 text-del"
           }`}
         >
           {exitCode}
         </span>
         <ChevronIcon
-          className={`h-3.5 w-3.5 shrink-0 text-zinc-600 transition-transform ${expanded ? "rotate-90" : ""}`}
+          className={`h-3.5 w-3.5 shrink-0 text-faint transition-transform ${expanded ? "rotate-90" : ""}`}
         />
       </button>
       {expanded && output ? (
-        <pre className="max-h-72 overflow-auto px-3 py-2 text-[11px] leading-relaxed text-zinc-400">
+        <pre className="max-h-72 overflow-auto px-3 py-2 text-[11px] leading-relaxed text-muted">
           {shown}
         </pre>
       ) : null}
@@ -153,7 +151,7 @@ function ScreenshotBlock({ artifactId, filename }: { artifactId: string; filenam
   const [full, setFull] = useState(false);
   return (
     <>
-      <div className="overflow-hidden rounded-xl border border-zinc-800">
+      <div className="overflow-hidden rounded-xl border border-line">
         <AuthedImage
           artifactId={artifactId}
           alt={filename}
@@ -208,29 +206,25 @@ function ApprovalCard({
   };
 
   return (
-    <div className="rounded-xl border border-amber-800/70 bg-amber-950/25 px-3.5 py-3">
+    <div className="rounded-xl border border-warn/35 bg-warn/10 px-3.5 py-3">
       <div className="flex items-center gap-2">
-        <WarningIcon className="h-4 w-4 text-amber-400" />
-        <span className="text-xs font-semibold uppercase tracking-wide text-amber-300">
+        <WarningIcon className="h-4 w-4 text-warn" />
+        <span className="text-xs font-semibold uppercase tracking-wide text-warn">
           Approval required
         </span>
-        <span className="rounded bg-amber-900/50 px-1.5 py-0.5 font-mono text-[10px] text-amber-300">
+        <span className="rounded bg-warn/15 px-1.5 py-0.5 font-mono text-[10px] text-warn">
           {kind}
         </span>
       </div>
-      <p className="mt-1.5 text-sm text-zinc-200">{description}</p>
+      <p className="mt-1.5 text-sm text-fg">{description}</p>
       <details className="mt-1">
-        <summary className="cursor-pointer text-[11px] text-amber-500/80">details</summary>
-        <pre className="mt-1 max-h-56 overflow-auto rounded-lg bg-black/50 p-2 text-[11px] text-zinc-400">
+        <summary className="cursor-pointer text-[11px] text-warn/80">details</summary>
+        <pre className="mt-1 max-h-56 overflow-auto rounded-lg bg-black/50 p-2 text-[11px] text-muted">
           {prettyJson(payload)}
         </pre>
       </details>
       {decided ? (
-        <p
-          className={`mt-2 text-xs font-medium ${
-            decided === "approved" ? "text-emerald-400" : "text-red-400"
-          }`}
-        >
+        <p className={`mt-2 text-xs font-medium ${decided === "approved" ? "text-add" : "text-del"}`}>
           {decided === "approved" ? "Approved" : "Denied"}
         </p>
       ) : (
@@ -238,7 +232,7 @@ function ApprovalCard({
           <button
             disabled={busy}
             onClick={() => decide("approve")}
-            className="flex h-10 flex-1 items-center justify-center gap-1.5 rounded-lg bg-emerald-600 text-sm font-semibold text-white active:bg-emerald-700 disabled:opacity-50"
+            className="flex h-10 flex-1 items-center justify-center gap-1.5 rounded-lg bg-accent text-sm font-semibold text-canvas active:bg-white disabled:opacity-40"
           >
             {busy ? <Spinner className="h-4 w-4" /> : <CheckIcon className="h-4 w-4" />}
             Approve
@@ -246,14 +240,14 @@ function ApprovalCard({
           <button
             disabled={busy}
             onClick={() => decide("deny")}
-            className="flex h-10 flex-1 items-center justify-center gap-1.5 rounded-lg bg-red-700 text-sm font-semibold text-white active:bg-red-800 disabled:opacity-50"
+            className="flex h-10 flex-1 items-center justify-center gap-1.5 rounded-lg border border-red-950 bg-red-950/30 text-sm font-semibold text-del active:bg-red-950/60 disabled:opacity-40"
           >
             <XIcon className="h-4 w-4" />
             Deny
           </button>
         </div>
       )}
-      {error ? <p className="mt-2 text-xs text-red-400">{error}</p> : null}
+      {error ? <p className="mt-2 text-xs text-del">{error}</p> : null}
     </div>
   );
 }
@@ -278,23 +272,23 @@ function TaskCompleted({
   if (compact && !prUrl) {
     // Chat feed: the summary is the answer; skip the chrome unless there's a PR.
     return resultSummary ? (
-      <div className="rounded-2xl rounded-tl-sm border border-zinc-800 border-l-2 border-l-emerald-600/70 bg-zinc-900/60 px-3.5 py-2.5">
+      <div className="max-w-full">
         <Markdown text={resultSummary} />
       </div>
     ) : null;
   }
   return (
-    <div className="rounded-xl border border-emerald-800/70 bg-emerald-950/25 px-3.5 py-3">
+    <div className="rounded-xl border border-line bg-surface px-3.5 py-3">
       <div className="flex items-center gap-2">
-        <CheckIcon className="h-4 w-4 text-emerald-400" />
-        <span className="text-xs font-semibold uppercase tracking-wide text-emerald-300">
+        <CheckIcon className="h-4 w-4 text-add" />
+        <span className="text-xs font-semibold uppercase tracking-wide text-muted">
           Task completed
         </span>
       </div>
       {resultSummary ? (
-        <p className="mt-1.5 whitespace-pre-wrap text-sm text-zinc-200">{resultSummary}</p>
+        <p className="mt-1.5 whitespace-pre-wrap text-sm text-fg">{resultSummary}</p>
       ) : null}
-      <div className="mt-2 flex flex-wrap gap-3 text-[11px] text-zinc-400">
+      <div className="mt-2 flex flex-wrap gap-3 font-mono text-[11px] text-faint">
         {branch ? <span>branch {branch}</span> : null}
         <span>{iterations} iterations</span>
         <span>{tokensUsed.toLocaleString()} tokens</span>
@@ -304,7 +298,7 @@ function TaskCompleted({
           href={prUrl}
           target="_blank"
           rel="noreferrer"
-          className="mt-3 flex h-10 items-center justify-center gap-2 rounded-lg bg-emerald-600 text-sm font-semibold text-white active:bg-emerald-700"
+          className="mt-3 flex h-10 items-center justify-center gap-2 rounded-lg bg-accent text-sm font-semibold text-canvas active:bg-white"
         >
           <GitPrIcon className="h-4 w-4" />
           Open pull request{prNumber ? ` #${prNumber}` : ""}
@@ -333,7 +327,7 @@ export default function EventCard({
     case "model_switch":
       return (
         <div className="flex justify-center py-0.5">
-          <span className="rounded-full border border-zinc-800/80 bg-zinc-900/50 px-2.5 py-0.5 text-[10px] text-zinc-500">
+          <span className="font-mono text-[10px] text-faint">
             {str(p.from)} busy · switched to {str(p.to)}
           </span>
         </div>
@@ -391,21 +385,21 @@ export default function EventCard({
       const backup = str(p.artifact_url);
       const title = str(p.title);
       return (
-        <div className="rounded-2xl border border-emerald-800/70 bg-emerald-950/20 px-3.5 py-3">
+        <div className="rounded-xl border border-line bg-surface px-3.5 py-3">
           <div className="flex items-center gap-2">
-            <GlobeIcon className="h-4 w-4 text-emerald-400" />
-            <span className="text-xs font-semibold uppercase tracking-wide text-emerald-300">
+            <GlobeIcon className="h-4 w-4 text-muted" />
+            <span className="text-xs font-semibold uppercase tracking-wide text-muted">
               Site deployed
             </span>
           </div>
-          {title ? <p className="mt-1 text-sm text-zinc-200">{title}</p> : null}
-          <div className="mt-2 flex flex-col gap-2">
+          {title ? <p className="mt-1 text-sm text-fg">{title}</p> : null}
+          <div className="mt-2.5 flex flex-col gap-2">
             {persistent ? (
               <a
                 href={persistent}
                 target="_blank"
                 rel="noreferrer"
-                className="flex h-10 items-center justify-center gap-2 rounded-lg bg-emerald-600 text-sm font-semibold text-white active:bg-emerald-700"
+                className="flex h-10 items-center justify-center gap-2 rounded-lg bg-accent text-sm font-semibold text-canvas active:bg-white"
               >
                 <GlobeIcon className="h-4 w-4" /> Open site
               </a>
@@ -414,7 +408,7 @@ export default function EventCard({
                 href={live}
                 target="_blank"
                 rel="noreferrer"
-                className="flex h-10 items-center justify-center gap-2 rounded-lg bg-emerald-600 text-sm font-semibold text-white active:bg-emerald-700"
+                className="flex h-10 items-center justify-center gap-2 rounded-lg bg-accent text-sm font-semibold text-canvas active:bg-white"
               >
                 <GlobeIcon className="h-4 w-4" /> Open live preview
               </a>
@@ -423,13 +417,18 @@ export default function EventCard({
                 href={backup}
                 target="_blank"
                 rel="noreferrer"
-                className="flex h-10 items-center justify-center gap-2 rounded-lg bg-emerald-600 text-sm font-semibold text-white active:bg-emerald-700"
+                className="flex h-10 items-center justify-center gap-2 rounded-lg bg-accent text-sm font-semibold text-canvas active:bg-white"
               >
                 <GlobeIcon className="h-4 w-4" /> Open page
               </a>
             ) : null}
             {persistent && live ? (
-              <a href={live} target="_blank" rel="noreferrer" className="text-center text-[11px] text-emerald-400/80">
+              <a
+                href={live}
+                target="_blank"
+                rel="noreferrer"
+                className="text-center text-[11px] text-faint"
+              >
                 live preview (temporary)
               </a>
             ) : null}
@@ -440,7 +439,7 @@ export default function EventCard({
     case "steered":
       return (
         <div className="flex justify-end">
-          <span className="rounded-full border border-emerald-900/70 bg-emerald-950/30 px-2.5 py-0.5 text-[11px] text-emerald-300/90">
+          <span className="rounded-full border border-line bg-elevated px-2.5 py-0.5 text-[11px] text-muted">
             steered: {str(p.message)}
           </span>
         </div>
@@ -448,9 +447,7 @@ export default function EventCard({
     case "context_compacted":
       return (
         <div className="flex justify-center py-0.5">
-          <span className="rounded-full border border-zinc-800/80 bg-zinc-900/50 px-2.5 py-0.5 text-[10px] text-zinc-500">
-            context compacted
-          </span>
+          <span className="font-mono text-[10px] text-faint">context compacted</span>
         </div>
       );
     case "approval_request":
@@ -467,9 +464,7 @@ export default function EventCard({
     case "approval_decision":
       return (
         <div className="flex justify-center">
-          <span className="rounded-full border border-zinc-800 bg-zinc-900 px-2.5 py-0.5 text-[11px] text-zinc-500">
-            approval {str(p.decision, "decided")}
-          </span>
+          <span className="text-[11px] text-faint">approval {str(p.decision, "decided")}</span>
         </div>
       );
     case "task_completed":
@@ -486,52 +481,52 @@ export default function EventCard({
       );
     case "task_failed":
       return (
-        <div className="rounded-xl border border-red-800/70 bg-red-950/25 px-3.5 py-3">
+        <div className="rounded-xl border border-red-950 bg-red-950/25 px-3.5 py-3">
           <div className="flex items-center gap-2">
-            <XIcon className="h-4 w-4 text-red-400" />
-            <span className="text-xs font-semibold uppercase tracking-wide text-red-300">
+            <XIcon className="h-4 w-4 text-del" />
+            <span className="text-xs font-semibold uppercase tracking-wide text-del">
               Task failed
             </span>
           </div>
-          <p className="mt-1.5 whitespace-pre-wrap text-sm text-zinc-300">{str(p.error)}</p>
+          <p className="mt-1.5 whitespace-pre-wrap text-sm text-muted">{str(p.error)}</p>
         </div>
       );
     case "task_stopped":
       return (
-        <div className="rounded-xl border border-zinc-700 bg-zinc-900/60 px-3.5 py-2.5">
-          <p className="text-xs text-zinc-400">Stopped — {str(p.reason, "no reason given")}</p>
+        <div className="rounded-xl border border-line bg-surface px-3.5 py-2.5">
+          <p className="text-xs text-muted">Stopped — {str(p.reason, "no reason given")}</p>
         </div>
       );
     case "checkpoint":
       return (
         <div className="flex items-center gap-3 py-1">
-          <span className="h-px flex-1 bg-zinc-800" />
-          <span className="text-[10px] uppercase tracking-wider text-zinc-600">
+          <span className="h-px flex-1 bg-line" />
+          <span className="font-mono text-[10px] uppercase tracking-wider text-faint">
             iteration {num(p.iteration)}
           </span>
-          <span className="h-px flex-1 bg-zinc-800" />
+          <span className="h-px flex-1 bg-line" />
         </div>
       );
     case "error":
       return (
-        <div className="rounded-xl border border-red-900/60 bg-red-950/20 px-3 py-2">
-          <p className="text-xs text-red-300">{str(p.message, "unknown error")}</p>
+        <div className="rounded-xl border border-red-950 bg-red-950/25 px-3 py-2">
+          <p className="text-xs text-del">{str(p.message, "unknown error")}</p>
         </div>
       );
     case "task_started":
       return (
         <div className="flex items-center gap-3 py-1">
-          <span className="h-px flex-1 bg-zinc-800" />
-          <span className="text-[10px] uppercase tracking-wider text-zinc-600">
+          <span className="h-px flex-1 bg-line" />
+          <span className="font-mono text-[10px] uppercase tracking-wider text-faint">
             agent started · {str(p.model, "model")}
           </span>
-          <span className="h-px flex-1 bg-zinc-800" />
+          <span className="h-px flex-1 bg-line" />
         </div>
       );
     default:
       return (
-        <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 px-3 py-2">
-          <p className="font-mono text-[11px] text-zinc-500">{event.type}</p>
+        <div className="rounded-xl border border-line bg-surface px-3 py-2">
+          <p className="font-mono text-[11px] text-faint">{event.type}</p>
         </div>
       );
   }
@@ -601,19 +596,17 @@ export function WorkLog({
   const [expanded, setExpanded] = useState(events.length <= 2);
   const tail = events[events.length - 1];
   return (
-    <div className="rounded-2xl border border-zinc-800/70 bg-zinc-900/30 px-2 py-1.5">
+    <div className="overflow-hidden rounded-xl border border-line bg-surface">
       <button
         onClick={() => setExpanded((v) => !v)}
-        className="flex w-full items-center gap-2 px-1 py-1 text-left text-[11px] text-zinc-500 active:text-zinc-300"
+        className="flex w-full items-center gap-2 px-3 py-2 text-left text-[11px] text-faint active:text-muted"
       >
-        {!expanded ? (
-          <span className="pulse-dot h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-500/70" />
-        ) : null}
-        <span className="shrink-0 font-medium text-zinc-400">
+        {!expanded ? <span className="pulse-dot h-1.5 w-1.5 shrink-0 rounded-full bg-muted" /> : null}
+        <span className="shrink-0 font-medium text-muted">
           {events.length} step{events.length === 1 ? "" : "s"}
         </span>
         {!expanded && tail ? (
-          <span className="min-w-0 flex-1 truncate">{workLabel(tail)}</span>
+          <span className="min-w-0 flex-1 truncate font-mono">{workLabel(tail)}</span>
         ) : (
           <span className="flex-1" />
         )}
@@ -622,7 +615,7 @@ export function WorkLog({
         />
       </button>
       {expanded ? (
-        <div className="flex flex-col gap-1.5 px-0.5 pb-1">
+        <div className="flex flex-col gap-1.5 border-t border-line px-2.5 py-2">
           {events.map((e) => (
             <EventCard
               key={e.seq}
@@ -634,7 +627,7 @@ export function WorkLog({
           ))}
         </div>
       ) : tail ? (
-        <div className="px-0.5 pb-1">
+        <div className="border-t border-line px-2.5 py-1.5">
           <EventCard event={tail} compact decidedApprovals={decidedApprovals} onDecided={onDecided} />
         </div>
       ) : null}

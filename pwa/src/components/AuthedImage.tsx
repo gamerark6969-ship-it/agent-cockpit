@@ -35,7 +35,7 @@ export default function AuthedImage({
 
   if (!url) {
     return (
-      <div className={`animate-pulse rounded-lg bg-zinc-800 ${className ?? "h-32 w-full"}`} />
+      <div className={`animate-pulse rounded-lg bg-elevated ${className ?? "h-32 w-full"}`} />
     );
   }
   return (

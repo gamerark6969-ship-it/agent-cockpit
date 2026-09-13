@@ -1,5 +1,28 @@
 @import "tailwindcss";
 
+@theme {
+  /* Flat, near-black Codex palette. Monochrome by default; color is reserved
+     for semantic status (add/del/warn) and used sparingly. */
+  --color-canvas: #0a0a0a;
+  --color-surface: #101010;
+  --color-elevated: #161616;
+  --color-hover: #1c1c1c;
+  --color-line: #232323;
+  --color-line-strong: #333333;
+  --color-fg: #ededed;
+  --color-muted: #a1a1a1;
+  --color-faint: #6e6e6e;
+  --color-accent: #ededed;
+  --color-add: #56d364;
+  --color-del: #f06a5f;
+  --color-warn: #d9a441;
+
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono",
+    monospace;
+
+  --radius-panel: 1rem;
+}
+
 :root {
   color-scheme: dark;
 }
@@ -12,13 +35,8 @@ body,
 
 body {
   margin: 0;
-  background-color: #08080a;
-  background-image:
-    radial-gradient(1100px 520px at 50% -8%, rgba(16, 185, 129, 0.1), transparent 60%),
-    radial-gradient(760px 420px at 100% 0%, rgba(59, 130, 246, 0.07), transparent 55%);
-  background-repeat: no-repeat;
-  background-attachment: fixed;
-  color: #e6e6ea;
+  background-color: var(--color-canvas);
+  color: var(--color-fg);
   font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial,
     sans-serif;
   -webkit-font-smoothing: antialiased;
@@ -31,7 +49,7 @@ body {
 }
 
 ::selection {
-  background: rgba(16, 185, 129, 0.32);
+  background: rgba(237, 237, 237, 0.18);
   color: #fff;
 }
 
@@ -44,15 +62,15 @@ body {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(82, 82, 91, 0.5);
+  background: rgba(82, 82, 82, 0.45);
   border-radius: 999px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(113, 113, 122, 0.7);
+  background: rgba(120, 120, 120, 0.6);
 }
 * {
   scrollbar-width: thin;
-  scrollbar-color: rgba(82, 82, 91, 0.5) transparent;
+  scrollbar-color: rgba(82, 82, 82, 0.45) transparent;
 }
 
 .safe-top {
@@ -64,7 +82,7 @@ body {
 }
 
 .pb-nav {
-  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 4.75rem);
+  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 4.5rem);
 }
 
 .no-scrollbar::-webkit-scrollbar {
@@ -90,7 +108,7 @@ body {
 @keyframes fade-in {
   from {
     opacity: 0;
-    transform: translateY(4px);
+    transform: translateY(3px);
   }
   to {
     opacity: 1;
@@ -98,21 +116,21 @@ body {
   }
 }
 .animate-fade-in {
-  animation: fade-in 0.22s ease-out both;
+  animation: fade-in 0.2s ease-out both;
 }
 
 @keyframes rise {
   from {
     opacity: 0;
-    transform: translateY(10px) scale(0.99);
+    transform: translateY(6px);
   }
   to {
     opacity: 1;
-    transform: translateY(0) scale(1);
+    transform: translateY(0);
   }
 }
 .animate-rise {
-  animation: rise 0.26s cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: rise 0.22s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
 @keyframes shimmer {
@@ -126,16 +144,16 @@ body {
 .shimmer {
   background: linear-gradient(
     90deg,
-    rgba(63, 63, 70, 0.15) 25%,
-    rgba(113, 113, 122, 0.25) 37%,
-    rgba(63, 63, 70, 0.15) 63%
+    rgba(63, 63, 63, 0.12) 25%,
+    rgba(115, 115, 115, 0.2) 37%,
+    rgba(63, 63, 63, 0.12) 63%
   );
   background-size: 800px 100%;
   animation: shimmer 1.4s linear infinite;
 }
 
 .glass {
-  background: rgba(24, 24, 27, 0.72);
+  background: rgba(16, 16, 16, 0.82);
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
 }
@@ -145,4 +163,8 @@ textarea,
 select,
 button {
   font: inherit;
+}
+
+textarea {
+  field-sizing: content;
 }

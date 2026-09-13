@@ -14,7 +14,7 @@ function renderInline(text: string, keyPrefix: string): ReactNode[] {
       nodes.push(
         <code
           key={`${keyPrefix}-c${i}`}
-          className="rounded bg-black/50 px-1 py-0.5 font-mono text-[0.85em] text-emerald-300"
+          className="rounded border border-line bg-elevated px-1 py-0.5 font-mono text-[0.85em] text-fg"
         >
           {m[1].slice(1, -1)}
         </code>,
@@ -26,7 +26,7 @@ function renderInline(text: string, keyPrefix: string): ReactNode[] {
           href={m[2]}
           target="_blank"
           rel="noreferrer"
-          className="break-all text-emerald-400 underline"
+          className="break-all text-fg underline decoration-line-strong underline-offset-2"
         >
           {m[2]}
         </a>,
@@ -94,7 +94,7 @@ export default function Markdown({ text, className = "" }: { text: string; class
     blocks.push(
       <pre
         key={`cb${i}`}
-        className="my-2 overflow-x-auto rounded-lg border border-zinc-800 bg-black/60 p-2.5 text-[11px] leading-relaxed text-zinc-300"
+        className="my-2 overflow-x-auto rounded-lg border border-line bg-black p-2.5 font-mono text-[11px] leading-relaxed text-fg"
       >
         <code>{m[2].replace(/\n$/, "")}</code>
       </pre>,
@@ -109,5 +109,5 @@ export default function Markdown({ text, className = "" }: { text: string; class
       </div>,
     );
   }
-  return <div className={`text-sm leading-relaxed text-zinc-200 ${className}`}>{blocks}</div>;
+  return <div className={`text-[15px] leading-relaxed text-fg ${className}`}>{blocks}</div>;
 }

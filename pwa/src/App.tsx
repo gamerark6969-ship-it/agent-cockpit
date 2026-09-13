@@ -21,7 +21,7 @@ function Shell() {
   const location = useLocation();
   const hideNav = location.pathname === "/login";
   return (
-    <div className="mx-auto min-h-dvh max-w-md bg-zinc-950 text-zinc-100">
+    <div className="mx-auto min-h-dvh max-w-md bg-canvas text-fg">
       <div className={hideNav ? "" : "pb-nav"}>
         <Routes>
           <Route path="/login" element={<Login />} />

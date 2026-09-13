@@ -52,16 +52,16 @@ export default function Chats() {
   const chats = projects.filter((p) => p.kind !== "repo");
 
   return (
-    <div className="safe-top px-4 pb-nav pt-5">
+    <div className="safe-top px-4 pb-nav pt-6">
       <header className="mb-5 flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-zinc-50">Chats</h1>
-          <p className="mt-0.5 text-xs text-zinc-500">Your autonomous agent, on tap</p>
+          <h1 className="text-xl font-semibold tracking-tight text-fg">Chats</h1>
+          <p className="mt-0.5 text-[13px] text-faint">Your autonomous agent, on tap</p>
         </div>
         <button
           onClick={() => void newChat()}
           disabled={creating}
-          className="flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-b from-emerald-500 to-emerald-600 text-white shadow-lg shadow-emerald-950/40 transition-transform active:scale-95 disabled:opacity-50"
+          className="flex h-10 w-10 items-center justify-center rounded-xl border border-line bg-surface text-muted transition-colors active:bg-hover disabled:opacity-40"
           aria-label="New chat"
         >
           {creating ? <Spinner className="h-4 w-4" /> : <PlusIcon />}
@@ -69,13 +69,13 @@ export default function Chats() {
       </header>
 
       {error ? (
-        <p className="animate-fade-in mb-3 rounded-2xl border border-red-900/60 bg-red-950/20 px-4 py-2.5 text-xs text-red-300">
+        <p className="animate-fade-in mb-3 rounded-xl border border-red-950 bg-red-950/30 px-3.5 py-2.5 text-xs text-del">
           {error}
         </p>
       ) : null}
 
       {loading ? (
-        <div className="flex justify-center py-16 text-zinc-500">
+        <div className="flex justify-center py-16 text-faint">
           <Spinner />
         </div>
       ) : chats.length === 0 ? (
@@ -85,23 +85,24 @@ export default function Chats() {
           description="Tap + to start a conversation. Ask the agent to search, read email, or work on GitHub."
         />
       ) : (
-        <div className="flex flex-col gap-2.5">
+        <div className="overflow-hidden rounded-2xl border border-line bg-surface">
           {chats.map((project, i) => (
             <div
               key={project.id}
-              className="animate-rise flex items-center gap-3 rounded-2xl border border-zinc-800/80 bg-zinc-900/50 px-3.5 py-3 backdrop-blur-sm"
-              style={{ animationDelay: `${Math.min(i, 8) * 30}ms` }}
+              className={`flex items-center gap-3 px-3.5 py-3 ${
+                i > 0 ? "border-t border-line" : ""
+              }`}
             >
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-400 ring-1 ring-emerald-500/20">
-                <ChatIcon className="h-5 w-5" />
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-elevated text-muted">
+                <ChatIcon className="h-[18px] w-[18px]" />
               </div>
               <Link to={`/c/${project.id}`} className="min-w-0 flex-1">
-                <p className="truncate text-sm font-semibold text-zinc-100">{project.name}</p>
-                <p className="mt-0.5 text-[11px] text-zinc-500">Tap to continue</p>
+                <p className="truncate text-sm font-medium text-fg">{project.name}</p>
+                <p className="mt-0.5 text-[11px] text-faint">Tap to continue</p>
               </Link>
               <button
                 onClick={() => void remove(project)}
-                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-zinc-600 transition-colors active:bg-zinc-800 active:text-red-400"
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-faint transition-colors active:bg-hover active:text-del"
                 aria-label="Delete chat"
               >
                 <TrashIcon className="h-4 w-4" />
@@ -113,16 +114,16 @@ export default function Chats() {
 
       <Link
         to="/projects"
-        className="mt-4 flex items-center gap-3 rounded-2xl border border-zinc-800/80 bg-zinc-900/40 px-4 py-3.5 transition-colors active:bg-zinc-900"
+        className="mt-3 flex items-center gap-3 rounded-2xl border border-line bg-surface px-3.5 py-3 transition-colors active:bg-hover"
       >
-        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-zinc-800/60 text-zinc-400">
-          <RepoIcon className="h-5 w-5" />
+        <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-elevated text-muted">
+          <RepoIcon className="h-[18px] w-[18px]" />
         </div>
         <div className="min-w-0 flex-1">
-          <p className="text-sm font-semibold text-zinc-200">Code workspaces</p>
-          <p className="text-[11px] text-zinc-500">Repo-scoped tasks and pull requests</p>
+          <p className="text-sm font-medium text-fg">Code workspaces</p>
+          <p className="mt-0.5 text-[11px] text-faint">Repo-scoped tasks and pull requests</p>
         </div>
-        <ChevronIcon className="h-4 w-4 text-zinc-600" />
+        <ChevronIcon className="h-4 w-4 text-faint" />
       </Link>
     </div>
   );

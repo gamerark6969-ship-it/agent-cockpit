@@ -2,12 +2,12 @@ import type { TaskStatus } from "../lib/api";
 import { STATUS_CLASSES, STATUS_LABELS } from "../lib/utils";
 
 const DOTS: Partial<Record<TaskStatus, string>> = {
-  queued: "bg-zinc-400",
+  queued: "bg-faint",
   running: "bg-blue-400",
-  awaiting_approval: "bg-amber-400",
-  done: "bg-emerald-400",
-  failed: "bg-red-400",
-  stopped: "bg-zinc-500",
+  awaiting_approval: "bg-warn",
+  done: "bg-add",
+  failed: "bg-del",
+  stopped: "bg-faint",
 };
 
 export default function StatusBadge({

@@ -142,20 +142,20 @@ export default function Connectors() {
     <div className="safe-top px-4 pb-nav pt-5">
       <header className="mb-5">
         <div className="flex items-center gap-2">
-          <PlugIcon className="h-5 w-5 text-emerald-400" />
-          <h1 className="text-2xl font-bold tracking-tight text-zinc-50">Connectors</h1>
+          <PlugIcon className="h-5 w-5 text-muted" />
+          <h1 className="text-xl font-semibold tracking-tight text-fg">Connectors</h1>
         </div>
-        <p className="mt-0.5 text-xs text-zinc-500">Give the agent access to your tools</p>
+        <p className="mt-0.5 text-[13px] text-faint">Give the agent access to your tools</p>
       </header>
 
       {error ? (
-        <p className="animate-fade-in mb-3 rounded-2xl border border-red-900/60 bg-red-950/20 px-4 py-2.5 text-xs text-red-300">
+        <p className="animate-fade-in mb-3 rounded-xl border border-red-950 bg-red-950/25 px-3.5 py-2.5 text-xs text-del">
           {error}
         </p>
       ) : null}
 
       {loading ? (
-        <div className="flex justify-center py-16 text-zinc-500">
+        <div className="flex justify-center py-16 text-faint">
           <Spinner />
         </div>
       ) : (
@@ -173,16 +173,16 @@ export default function Connectors() {
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
-                      <p className="text-sm font-semibold text-zinc-100">{item.title}</p>
+                      <p className="text-sm font-semibold text-fg">{item.title}</p>
                       {c?.enabled ? (
-                        <span className="flex items-center gap-1 rounded-full bg-emerald-950 px-2 py-0.5 text-[10px] font-medium text-emerald-400">
+                        <span className="flex items-center gap-1 rounded-full border border-line bg-elevated px-2 py-0.5 text-[10px] font-medium text-muted">
                           <CheckIcon className="h-3 w-3" /> connected
                         </span>
                       ) : null}
                     </div>
-                    <p className="mt-0.5 text-xs text-zinc-500">{item.blurb}</p>
+                    <p className="mt-0.5 text-xs text-faint">{item.blurb}</p>
                     {c && Object.keys(c.config).length ? (
-                      <p className="mt-1 truncate font-mono text-[10px] text-zinc-600">
+                      <p className="mt-1 truncate font-mono text-[10px] text-faint">
                         {Object.entries(c.config)
                           .map(([k, v]) => `${k}: ${v}`)
                           .join("  ·  ")}
@@ -195,8 +195,8 @@ export default function Connectors() {
                       disabled={busy}
                       className={`shrink-0 rounded-full px-3 py-1 text-[11px] font-semibold ${
                         c.enabled
-                          ? "bg-emerald-600 text-white"
-                          : "border border-zinc-700 text-zinc-400"
+                          ? "bg-accent text-canvas"
+                          : "border border-line text-faint"
                       }`}
                     >
                       {c.enabled ? "on" : "off"}
@@ -239,11 +239,11 @@ export default function Connectors() {
                         {c ? "Update" : "Connect"}
                       </button>
                     ) : (
-                      <span className="text-[11px] text-zinc-600">Not available yet</span>
+                      <span className="text-[11px] text-faint">Not available yet</span>
                     )}
                     {c ? (
                       <button
-                        className="flex h-11 w-11 items-center justify-center rounded-xl border border-zinc-800 text-zinc-600 active:text-red-400"
+                        className="flex h-11 w-11 items-center justify-center rounded-xl border border-line text-faint active:text-del"
                         onClick={() => void remove(c)}
                         disabled={busy}
                         aria-label="Disconnect"
@@ -259,7 +259,7 @@ export default function Connectors() {
         </div>
       )}
 
-      <p className="mt-4 text-center text-[11px] text-zinc-600">
+      <p className="mt-4 text-center text-[11px] text-faint">
         Secrets are encrypted at rest and never shown again after saving.
       </p>
     </div>

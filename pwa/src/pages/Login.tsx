@@ -22,22 +22,22 @@ export default function Login() {
   return (
     <div className="safe-top safe-bottom flex min-h-dvh flex-col justify-center px-6">
       <div className="mb-8">
-        <div className="mb-5 flex h-16 w-16 items-center justify-center rounded-3xl bg-gradient-to-b from-emerald-400 to-emerald-600 text-2xl font-black text-white shadow-2xl shadow-emerald-900/50">
+        <div className="mb-5 flex h-14 w-14 items-center justify-center rounded-2xl border border-line bg-surface text-xl font-semibold text-fg">
           AC
         </div>
-        <h1 className="text-3xl font-bold tracking-tight text-zinc-50">Agent Cockpit</h1>
-        <p className="mt-1.5 text-sm text-zinc-500">
+        <h1 className="text-2xl font-semibold tracking-tight text-fg">Agent Cockpit</h1>
+        <p className="mt-1.5 text-sm text-faint">
           Control an autonomous software engineer from your phone.
         </p>
       </div>
 
       {existing ? (
-        <div className="mb-6 rounded-2xl border border-emerald-900/60 bg-emerald-950/20 px-4 py-3">
-          <p className="text-xs text-emerald-300">A token is already saved on this device.</p>
+        <div className="mb-6 rounded-xl border border-line bg-surface px-3.5 py-3">
+          <p className="text-xs text-muted">A token is already saved on this device.</p>
         </div>
       ) : null}
 
-      <label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
+      <label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wider text-faint">
         Access token
       </label>
       <input
@@ -55,7 +55,7 @@ export default function Login() {
           if (e.key === "Enter") connect();
         }}
       />
-      {error ? <p className="mt-2 text-xs text-red-400">{error}</p> : null}
+      {error ? <p className="mt-2 text-xs text-del">{error}</p> : null}
 
       <div className="mt-4 flex flex-col gap-2">
         <button className={btnPrimary} onClick={connect}>
@@ -67,7 +67,7 @@ export default function Login() {
               Continue with saved token
             </button>
             <button
-              className="py-2 text-xs text-zinc-500 transition-colors active:text-zinc-300"
+              className="py-2 text-xs text-faint transition-colors active:text-muted"
               onClick={() => {
                 clearToken();
                 setValue("");

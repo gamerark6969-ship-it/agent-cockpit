@@ -77,17 +77,15 @@ export default function FilePreview({ artifactId, filename, mime = "", title }: 
   };
 
   const header = (
-    <div className="flex items-center gap-2 border-b border-zinc-800/80 bg-zinc-900/60 px-3 py-1.5">
-      <FileIcon className="h-3.5 w-3.5 shrink-0 text-zinc-500" />
-      <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-zinc-300">
-        {title || filename}
-      </span>
+    <div className="flex items-center gap-2 border-b border-line bg-surface px-3 py-1.5">
+      <FileIcon className="h-3.5 w-3.5 shrink-0 text-faint" />
+      <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-fg">{title || filename}</span>
       {kind === "text" ? (
-        <button onClick={() => void copy()} className="text-[11px] text-zinc-500 active:text-zinc-300">
+        <button onClick={() => void copy()} className="text-[11px] text-faint active:text-muted">
           {copied ? "copied" : "copy"}
         </button>
       ) : null}
-      <button onClick={open} className="text-[11px] text-emerald-400 active:text-emerald-300">
+      <button onClick={open} className="text-[11px] text-fg active:text-muted">
         open
       </button>
     </div>
@@ -95,17 +93,17 @@ export default function FilePreview({ artifactId, filename, mime = "", title }: 
 
   if (error) {
     return (
-      <div className="rounded-xl border border-red-900/60 bg-red-950/20 px-3 py-2">
-        <p className="text-xs text-red-300">{error}</p>
+      <div className="rounded-xl border border-red-950 bg-red-950/25 px-3 py-2">
+        <p className="text-xs text-del">{error}</p>
       </div>
     );
   }
 
   if (!url) {
     return (
-      <div className="overflow-hidden rounded-xl border border-zinc-800 bg-zinc-900/40">
+      <div className="overflow-hidden rounded-xl border border-line bg-surface">
         {header}
-        <div className="flex items-center justify-center gap-2 py-8 text-xs text-zinc-500">
+        <div className="flex items-center justify-center gap-2 py-8 text-xs text-faint">
           <Spinner className="h-4 w-4" /> loading {filename}…
         </div>
       </div>
@@ -114,7 +112,7 @@ export default function FilePreview({ artifactId, filename, mime = "", title }: 
 
   if (kind === "html") {
     return (
-      <div className="overflow-hidden rounded-xl border border-zinc-800 bg-white">
+      <div className="overflow-hidden rounded-xl border border-line bg-white">
         {header}
         <iframe
           title={title || filename}
@@ -128,7 +126,7 @@ export default function FilePreview({ artifactId, filename, mime = "", title }: 
 
   if (kind === "image") {
     return (
-      <div className="overflow-hidden rounded-xl border border-zinc-800 bg-zinc-900/40">
+      <div className="overflow-hidden rounded-xl border border-line bg-surface">
         {header}
         <button onClick={open} className="block w-full">
           <img src={url} alt={title || filename} className="max-h-80 w-full object-contain" />
@@ -139,7 +137,7 @@ export default function FilePreview({ artifactId, filename, mime = "", title }: 
 
   if (kind === "pdf") {
     return (
-      <div className="overflow-hidden rounded-xl border border-zinc-800 bg-zinc-900/40">
+      <div className="overflow-hidden rounded-xl border border-line bg-surface">
         {header}
         <iframe title={title || filename} src={url} className="h-[60vh] min-h-[18rem] w-full" />
       </div>
@@ -148,12 +146,12 @@ export default function FilePreview({ artifactId, filename, mime = "", title }: 
 
   if (kind === "text") {
     return (
-      <div className="overflow-hidden rounded-xl border border-zinc-800 bg-black/60">
+      <div className="overflow-hidden rounded-xl border border-line bg-black">
         {header}
-        <div className="flex items-center gap-1.5 px-3 pt-2 text-[10px] uppercase tracking-wide text-zinc-600">
+        <div className="flex items-center gap-1.5 px-3 pt-2 font-mono text-[10px] uppercase tracking-wide text-faint">
           <CodeIcon className="h-3.5 w-3.5" /> preview
         </div>
-        <pre className="max-h-96 overflow-auto px-3 py-2 text-[11px] leading-relaxed text-zinc-300">
+        <pre className="max-h-96 overflow-auto px-3 py-2 text-[11px] leading-relaxed text-fg">
           {text ?? "loading…"}
         </pre>
       </div>
@@ -161,12 +159,12 @@ export default function FilePreview({ artifactId, filename, mime = "", title }: 
   }
 
   return (
-    <div className="overflow-hidden rounded-xl border border-zinc-800 bg-zinc-900/40">
+    <div className="overflow-hidden rounded-xl border border-line bg-surface">
       {header}
       <a
         href={url}
         download={filename}
-        className="flex items-center justify-center gap-2 px-3 py-6 text-sm text-emerald-400 active:text-emerald-300"
+        className="flex items-center justify-center gap-2 px-3 py-6 text-sm text-fg active:text-muted"
       >
         <DownloadIcon className="h-4 w-4" /> Download {filename}
       </a>

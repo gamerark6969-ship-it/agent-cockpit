@@ -75,7 +75,7 @@ export default function ProjectDetail() {
 
   if (loading) {
     return (
-      <div className="flex justify-center py-16 text-zinc-500">
+      <div className="flex justify-center py-16 text-faint">
         <Spinner />
       </div>
     );
@@ -84,24 +84,24 @@ export default function ProjectDetail() {
   if (!project) {
     return (
       <div className="px-4 pt-6">
-        <p className="text-sm text-red-400">{error || "project not found"}</p>
+        <p className="text-sm text-del">{error || "project not found"}</p>
       </div>
     );
   }
 
   return (
     <div className="safe-top px-4 pt-4">
-      <Link to="/projects" className="mb-3 inline-block text-xs text-zinc-500">
+      <Link to="/projects" className="mb-3 inline-block text-xs text-faint">
         ← Projects
       </Link>
       <div className="mb-4 flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <h1 className="truncate text-xl font-bold text-zinc-100">{project.name}</h1>
-          <p className="mt-0.5 truncate text-xs text-zinc-500">{project.repo_url}</p>
+          <h1 className="truncate text-xl font-semibold tracking-tight text-fg">{project.name}</h1>
+          <p className="mt-0.5 truncate text-xs text-faint">{project.repo_url}</p>
         </div>
         <button
           onClick={() => setShowForm((v) => !v)}
-          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-white active:bg-emerald-700"
+          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-line bg-surface text-muted active:bg-hover"
           aria-label="New task"
         >
           <PlusIcon />
@@ -110,7 +110,7 @@ export default function ProjectDetail() {
 
       {showForm ? (
         <div className={`${card} mb-4`}>
-          <p className="mb-3 text-sm font-semibold text-zinc-200">Delegate a task</p>
+          <p className="mb-3 text-sm font-semibold text-fg">Delegate a task</p>
           <textarea
             className={`${textareaBase} min-h-28`}
             placeholder="e.g. Add Google OAuth to the API and cover it with tests"
@@ -118,7 +118,7 @@ export default function ProjectDetail() {
             onChange={(e) => setPrompt(e.target.value)}
           />
           <div className="mt-2.5">
-            <label className="mb-1 block text-[11px] text-zinc-500">Model</label>
+            <label className="mb-1 block text-[11px] text-faint">Model</label>
             {models.length > 0 ? (
               <select
                 className={inputBase}
@@ -154,12 +154,12 @@ export default function ProjectDetail() {
       ) : null}
 
       {error ? (
-        <p className="mb-3 rounded-lg border border-red-900/60 bg-red-950/20 px-3 py-2 text-xs text-red-300">
+        <p className="mb-3 rounded-lg border border-red-950 bg-red-950/25 px-3 py-2 text-xs text-del">
           {error}
         </p>
       ) : null}
 
-      <h2 className="mb-2 text-xs font-medium uppercase tracking-wide text-zinc-500">Tasks</h2>
+      <h2 className="mb-2 text-xs font-medium uppercase tracking-wide text-faint">Tasks</h2>
       {tasks.length === 0 ? (
         <EmptyState
           title="No tasks yet"
@@ -170,16 +170,16 @@ export default function ProjectDetail() {
           {[...tasks].reverse().map((task) => (
             <Link key={task.id} to={`/tasks/${task.id}`} className={`${card} block`}>
               <div className="flex items-start justify-between gap-3">
-                <p className="line-clamp-2 min-w-0 flex-1 text-sm text-zinc-200">{task.prompt}</p>
+                <p className="line-clamp-2 min-w-0 flex-1 text-sm text-fg">{task.prompt}</p>
                 <StatusBadge status={task.status} compact />
               </div>
-              <div className="mt-2 flex items-center gap-3 text-[11px] text-zinc-600">
+              <div className="mt-2 flex items-center gap-3 font-mono text-[11px] text-faint">
                 <span>{relativeTime(task.created_at)}</span>
                 <span>{task.iterations} iters</span>
                 {task.model ? <span className="truncate">{task.model}</span> : null}
               </div>
               {task.error ? (
-                <p className="mt-1.5 line-clamp-2 text-[11px] text-red-400">{task.error}</p>
+                <p className="mt-1.5 line-clamp-2 text-[11px] text-del">{task.error}</p>
               ) : null}
             </Link>
           ))}

@@ -44,12 +44,12 @@ export const STATUS_LABELS: Record<TaskStatus, string> = {
 };
 
 export const STATUS_CLASSES: Record<TaskStatus, string> = {
-  queued: "bg-zinc-800 text-zinc-300 border-zinc-700",
-  running: "bg-blue-950 text-blue-300 border-blue-800",
-  awaiting_approval: "bg-amber-950 text-amber-300 border-amber-800",
-  done: "bg-emerald-950 text-emerald-300 border-emerald-800",
-  failed: "bg-red-950 text-red-300 border-red-800",
-  stopped: "bg-zinc-900 text-zinc-400 border-zinc-700",
+  queued: "bg-surface text-muted border-line",
+  running: "bg-blue-950/40 text-blue-300 border-blue-900/60",
+  awaiting_approval: "bg-warn/10 text-warn border-warn/35",
+  done: "bg-surface text-fg border-line",
+  failed: "bg-red-950/25 text-del border-red-950",
+  stopped: "bg-surface text-faint border-line",
 };
 
 export function truncate(text: string, max = 400): string {

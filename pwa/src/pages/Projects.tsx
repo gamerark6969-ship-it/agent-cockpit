@@ -71,10 +71,10 @@ export default function Projects() {
   return (
     <div className="safe-top px-4 pt-4">
       <div className="mb-4 flex items-center justify-between">
-        <h1 className="text-xl font-bold text-zinc-100">Projects</h1>
+        <h1 className="text-xl font-semibold tracking-tight text-fg">Projects</h1>
         <button
           onClick={() => setShowForm((v) => !v)}
-          className="flex h-10 w-10 items-center justify-center rounded-full bg-emerald-600 text-white active:bg-emerald-700"
+          className="flex h-10 w-10 items-center justify-center rounded-xl border border-line bg-surface text-muted active:bg-hover"
           aria-label="New project"
         >
           <PlusIcon />
@@ -83,7 +83,7 @@ export default function Projects() {
 
       {showForm ? (
         <div className={`${card} mb-4`}>
-          <p className="mb-3 text-sm font-semibold text-zinc-200">New project</p>
+          <p className="mb-3 text-sm font-semibold text-fg">New project</p>
           <div className="flex flex-col gap-2.5">
             <input
               className={inputBase}
@@ -117,13 +117,13 @@ export default function Projects() {
       ) : null}
 
       {error ? (
-        <p className="mb-3 rounded-lg border border-red-900/60 bg-red-950/20 px-3 py-2 text-xs text-red-300">
+        <p className="mb-3 rounded-lg border border-red-950 bg-red-950/25 px-3 py-2 text-xs text-del">
           {error}
         </p>
       ) : null}
 
       {loading ? (
-        <div className="flex justify-center py-12 text-zinc-500">
+        <div className="flex justify-center py-12 text-faint">
           <Spinner />
         </div>
       ) : projects.length === 0 ? (
@@ -140,15 +140,15 @@ export default function Projects() {
                   className="min-w-0 flex-1 text-left"
                   onClick={() => navigate(`/projects/${project.id}`)}
                 >
-                  <p className="truncate text-sm font-semibold text-zinc-100">{project.name}</p>
-                  <p className="mt-0.5 truncate text-xs text-zinc-500">{project.repo_url}</p>
-                  <p className="mt-1 text-[11px] text-zinc-600">
+                  <p className="truncate text-sm font-semibold text-fg">{project.name}</p>
+                  <p className="mt-0.5 truncate text-xs text-faint">{project.repo_url}</p>
+                  <p className="mt-1 font-mono text-[11px] text-faint">
                     branch {project.default_branch}
                   </p>
                 </button>
                 <button
                   onClick={() => void remove(project)}
-                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-zinc-600 active:bg-zinc-800 active:text-red-400"
+                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-faint active:bg-hover active:text-del"
                   aria-label="Delete project"
                 >
                   <TrashIcon className="h-4 w-4" />

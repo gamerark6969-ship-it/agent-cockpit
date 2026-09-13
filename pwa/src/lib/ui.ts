@@ -1,19 +1,19 @@
 export const inputBase =
-  "h-12 w-full rounded-2xl border border-zinc-800 bg-zinc-900/70 px-4 text-[15px] text-zinc-100 placeholder-zinc-600 transition-colors focus:border-emerald-600/70 focus:bg-zinc-900 focus:outline-none focus:ring-2 focus:ring-emerald-600/20";
+  "h-11 w-full rounded-xl border border-line bg-surface px-3.5 text-[15px] text-fg placeholder-faint transition-colors focus:border-line-strong focus:bg-elevated focus:outline-none";
 
 export const textareaBase =
-  "w-full rounded-2xl border border-zinc-800 bg-zinc-900/70 px-4 py-3 text-[15px] leading-relaxed text-zinc-100 placeholder-zinc-600 transition-colors focus:border-emerald-600/70 focus:bg-zinc-900 focus:outline-none focus:ring-2 focus:ring-emerald-600/20";
+  "w-full rounded-xl border border-line bg-surface px-3.5 py-3 text-[15px] leading-relaxed text-fg placeholder-faint transition-colors focus:border-line-strong focus:bg-elevated focus:outline-none";
 
 export const btnPrimary =
-  "flex h-12 items-center justify-center gap-2 rounded-2xl bg-gradient-to-b from-emerald-500 to-emerald-600 px-4 text-sm font-semibold text-white shadow-lg shadow-emerald-950/40 transition-transform active:scale-[0.98] active:from-emerald-600 active:to-emerald-700 disabled:opacity-50 disabled:shadow-none";
+  "flex h-11 items-center justify-center gap-2 rounded-xl bg-accent px-4 text-sm font-semibold text-canvas transition-colors active:bg-white disabled:opacity-40";
 
 export const btnGhost =
-  "flex h-12 items-center justify-center gap-2 rounded-2xl border border-zinc-800 bg-zinc-900/60 px-4 text-sm font-semibold text-zinc-300 transition-colors active:scale-[0.98] active:bg-zinc-800 disabled:opacity-50";
+  "flex h-11 items-center justify-center gap-2 rounded-xl border border-line bg-transparent px-4 text-sm font-semibold text-muted transition-colors active:bg-hover disabled:opacity-40";
 
 export const btnDanger =
-  "flex h-12 items-center justify-center gap-2 rounded-2xl bg-red-700 px-4 text-sm font-semibold text-white shadow-lg shadow-red-950/40 transition-transform active:scale-[0.98] active:bg-red-800 disabled:opacity-50";
+  "flex h-11 items-center justify-center gap-2 rounded-xl border border-red-900/50 bg-red-950/30 px-4 text-sm font-semibold text-del transition-colors active:bg-red-950/60 disabled:opacity-40";
 
 export const card =
-  "rounded-2xl border border-zinc-800/80 bg-zinc-900/50 px-4 py-3.5 backdrop-blur-sm";
+  "rounded-2xl border border-line bg-surface";
 
-export const label = "text-[11px] font-semibold uppercase tracking-wider text-zinc-500";
+export const label = "text-[11px] font-semibold uppercase tracking-wider text-faint";
