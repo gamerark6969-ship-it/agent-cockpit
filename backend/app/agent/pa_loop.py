@@ -1,9 +1,8 @@
-"""Pydantic AI–powered agent loop.
+"""Pydantic AI–powered agent loop (the only agent implementation).
 
-Enabled with ``AGENT_FRAMEWORK=pydantic_ai`` (the default). It reuses all the
-surrounding machinery from the legacy loop — ``tools.py`` (dispatch + approval
-events), permissions, persistence, sandbox setup — and swaps out the one thing
-that kept breaking: the hand-rolled LLM turn / provider-failover code.
+It reuses all the surrounding machinery — ``tools.py`` (dispatch + approval
+events), permissions, persistence, sandbox setup (``runtime.py``) — and lets
+pydantic-ai own the LLM turn: provider failover, streaming, structured output.
 
 Why this is more robust than the hand-rolled loop:
   * ``FallbackModel`` owns provider failover (transient 429/503/400 -> next model).
@@ -11,8 +10,6 @@ Why this is more robust than the hand-rolled loop:
   * Tool schemas come from ``tools.py`` and become typed pydantic arg models.
   * The full conversation is persisted in pydantic-ai's own message format
     (``Task.pa_history``), so a crashed/restarted task resumes its tool trace.
-
-The legacy loop (``loop.py``) stays importable; flip the flag to roll back.
 """
 
 from __future__ import annotations
@@ -50,7 +47,7 @@ from .. import sandbox as sbx_mod
 from ..db import SessionLocal, get_settings_data
 from ..models import Project, new_id
 from ..permissions import evaluate
-from .loop import (
+from .runtime import (
     _approval_description,
     _create_approval,
     _emit,

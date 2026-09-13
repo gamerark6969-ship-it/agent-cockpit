@@ -13,7 +13,11 @@ from .. import connectors as connectors_mod
 from .. import sandbox as sbx_mod
 from ..db import SessionLocal, get_settings_data, save_settings
 from ..events import subscribe, unsubscribe
-from ..llm import DEFAULT_TASK_MODEL, LLMNotConfigured, any_configured, list_all_models
+from ..agent.models import (
+    PA_DEFAULT_MODEL as DEFAULT_TASK_MODEL,
+    any_configured,
+    list_pa_models,
+)
 from ..models import (
     Approval,
     Artifact,
@@ -533,9 +537,7 @@ async def list_models():
     if not any_configured():
         return ModelsOut(models=[])
     try:
-        models = await list_all_models()
-    except LLMNotConfigured:
-        return ModelsOut(models=[])
+        models = list_pa_models()
     except Exception as exc:
         log.warning("models proxy failed: %s", exc)
         raise HTTPException(status_code=502, detail=f"failed to fetch models: {exc}")

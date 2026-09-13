@@ -37,6 +37,30 @@ PA_DEFAULT_MODEL = "deepseek-v4.1-flash"
 # alias of gemini-3.8-flash and shares the same quota.
 PA_FALLBACK_MODELS = ("deepseek-v4.1-flash", "gemini-3.8-flash")
 
+# Known-good, currently available chat models surfaced in the app. Deprecated
+# ids (e.g. gemini-2.5-pro) are deliberately excluded.
+GEMINI_MODEL_CATALOG = [
+    "gemini-3.8-flash",
+    "gemini-flash-latest",
+    "gemini-pro-latest",
+    "gemini-3.1-pro-preview",
+]
+
+BAI_MODELS = ["deepseek-v4.1-flash"]
+
+# Order matters: first entry is the UI default, the rest are failover targets.
+MODEL_CATALOG = [PA_DEFAULT_MODEL, *GEMINI_MODEL_CATALOG]
+
+
+def list_pa_models() -> List[str]:
+    """Model ids to surface in the app, filtered by configured providers."""
+    out: List[str] = []
+    if settings.BAI_API_KEY:
+        out.extend([m for m in BAI_MODELS if m not in out])
+    if settings.AGENTROUTER_API_KEY:
+        out.extend([m for m in GEMINI_MODEL_CATALOG if m not in out])
+    return out
+
 
 def _is_bai_model(name: str) -> bool:
     return name.startswith("deepseek") or name.startswith("b.ai/")

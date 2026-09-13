@@ -19,10 +19,10 @@ async def get_session():
 
 def _default_settings() -> dict:
     from .schemas import SettingsOut
-    from .llm import DEFAULT_TASK_MODEL
+    from .agent.models import PA_DEFAULT_MODEL
 
     data = SettingsOut().model_dump()
-    data["default_model"] = DEFAULT_TASK_MODEL
+    data["default_model"] = PA_DEFAULT_MODEL
     return data
 
 

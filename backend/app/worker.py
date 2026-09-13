@@ -116,10 +116,7 @@ class Worker:
     # ── main loop ────────────────────────────────────────
 
     async def _run(self) -> None:
-        if getattr(settings, "AGENT_FRAMEWORK", "pydantic_ai") == "legacy":
-            from .agent.loop import run_agent_loop
-        else:
-            from .agent.pa_loop import run_agent_loop
+        from .agent.pa_loop import run_agent_loop
 
         concurrency = max(1, int(settings.WORKER_CONCURRENCY))
         semaphore = asyncio.Semaphore(concurrency)
