@@ -177,6 +177,15 @@ async def _gh_put(client: httpx.AsyncClient, repo: str, path: str, content: byte
         raise RuntimeError(f"upload failed for {path}: {resp.status_code} {resp.text[:200]}")
 
 
+async def _gh_ensure_nojekyll(client: httpx.AsyncClient, repo: str) -> None:
+    """Jekyll (Pages' default builder) drops paths starting with ``_`` such as
+    ``_next/``. An empty ``.nojekyll`` at the repo root disables it."""
+    url = f"https://api.github.com/repos/{repo}/contents/.nojekyll"
+    if (await client.get(url)).status_code == 200:
+        return
+    await _gh_put(client, repo, ".nojekyll", b"", "disable jekyll")
+
+
 async def _gh_enable_pages(client: httpx.AsyncClient, repo: str) -> Optional[str]:
     """Ensure Pages is enabled. Returns None on success, else an error string.
 
@@ -205,10 +214,13 @@ async def _deploy_github_pages(
             if not login:
                 return None, "GitHub token rejected (check PAT scopes)"
             repo = await _gh_ensure_repo(client, login)
+            await _gh_ensure_nojekyll(client, repo)
             prefix = f"sites/{task_id}"
             for rel, content in files.items():
                 await _gh_put(client, repo, f"{prefix}/{rel}", content, f"deploy {task_id}: {rel}")
             pages_err = await _gh_enable_pages(client, repo)
+            # kick off a build promptly instead of waiting for the push event
+            await client.post(f"https://api.github.com/repos/{repo}/pages/builds")
         entry = "index.html" if "index.html" in files else next(iter(files))
         url = f"https://{login}.github.io/{PAGES_REPO}/{prefix}/{entry}"
         if pages_err:
