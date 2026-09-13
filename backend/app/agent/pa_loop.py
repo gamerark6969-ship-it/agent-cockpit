@@ -26,7 +26,12 @@ from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field, create_model
 from pydantic_ai import Agent, CancellationToken, RunContext
-from pydantic_ai.exceptions import ModelAPIError, RunCancelled, UnexpectedModelBehavior
+from pydantic_ai.exceptions import (
+    FallbackExceptionGroup,
+    ModelAPIError,
+    RunCancelled,
+    UnexpectedModelBehavior,
+)
 from pydantic_ai.messages import (
     ModelMessage,
     ModelMessagesTypeAdapter,
@@ -400,15 +405,22 @@ async def run_agent_loop(task_id: str, worker) -> None:
 
         # ── build the agent ──
         tool_defs = [d for d in all_tool_definitions() if d["function"]["name"] != "finish"]
+        # Mixed output: the finish tool for structured completion, plus plain
+        # text so a direct answer ends the turn (and, critically, so the
+        # OpenAI-compatible provider gets tool_choice='auto', which b.ai's
+        # thinking mode requires — it rejects forced tool_choice).
         agent = Agent(
             model,
             deps_type=RunDeps,
             system_prompt=GENERAL_SYSTEM_PROMPT if is_chat else SYSTEM_PROMPT,
-            output_type=ToolOutput(
-                FinishResult,
-                name="finish",
-                description="Call when the task is fully complete; put the final answer/summary in result_summary.",
-            ),
+            output_type=[
+                ToolOutput(
+                    FinishResult,
+                    name="finish",
+                    description="Call when the task is fully complete; put the final answer/summary in result_summary.",
+                ),
+                str,
+            ],
             tools=[_make_tool(d) for d in tool_defs],
             end_strategy="graceful",
         )
@@ -439,52 +451,80 @@ async def run_agent_loop(task_id: str, worker) -> None:
         final_messages: List[ModelMessage] = list(history)
 
         try:
-            async with agent.iter(prompt, message_history=history, deps=deps, cancellation_token=token) as run:
-                async for node in run:
-                    if stop_event.is_set():
-                        abort_reason = "stopped"
+            # A repo turn that ends with plain text instead of the finish tool
+            # is nudged (like the legacy loop) so work can't end silently
+            # without commit/push/PR+finish.
+            round_prompt: Optional[str] = prompt
+            round_history: List[ModelMessage] = list(history)
+            for _ in range(4):
+                if stop_event.is_set():
+                    abort_reason = "stopped"
+                    break
+                async with agent.iter(round_prompt, message_history=round_history, deps=deps, cancellation_token=token) as run:
+                    async for node in run:
+                        if stop_event.is_set():
+                            abort_reason = "stopped"
+                            break
+
+                        if Agent.is_model_request_node(node):
+                            async with node.stream(run.ctx) as stream:
+                                async for ev in stream:
+                                    if isinstance(ev, PartStartEvent) and isinstance(ev.part, TextPart):
+                                        await deltas.push(ev.part.content)
+                                    elif isinstance(ev, PartDeltaEvent) and isinstance(ev.delta, TextPartDelta):
+                                        await deltas.push(ev.delta.content_delta or "")
+                            await deltas.flush()
+
+                        elif Agent.is_call_tools_node(node):
+                            resp = node.model_response
+                            iterations += 1
+                            usage = getattr(resp, "usage", None)
+                            if usage is not None:
+                                tokens_used += int(getattr(usage, "input_tokens", 0) or 0) + int(
+                                    getattr(usage, "output_tokens", 0) or 0
+                                )
+                            current_model = await _sync_answering_model(task_id, resp, current_model)
+                            text = _response_text(resp)
+                            if text:
+                                await _emit(task_id, "agent_message", {"content": text})
+                            if ctx.sandbox is not None:
+                                await sbx_mod.keep_alive(ctx.sandbox)
+                            await _update_task(task_id, iterations=iterations, tokens_used=tokens_used)
+
+                            if iterations >= max_iterations:
+                                abort_reason = f"iteration limit reached ({max_iterations}) without finishing"
+                                break
+                            if tokens_used >= token_budget:
+                                abort_reason = f"token budget exhausted ({tokens_used}/{token_budget})"
+                                break
+
+                    if abort_reason is not None:
                         break
-
-                    if Agent.is_model_request_node(node):
-                        async with node.stream(run.ctx) as stream:
-                            async for ev in stream:
-                                if isinstance(ev, PartStartEvent) and isinstance(ev.part, TextPart):
-                                    await deltas.push(ev.part.content)
-                                elif isinstance(ev, PartDeltaEvent) and isinstance(ev.delta, TextPartDelta):
-                                    await deltas.push(ev.delta.content_delta or "")
-                        await deltas.flush()
-
-                    elif Agent.is_call_tools_node(node):
-                        resp = node.model_response
-                        iterations += 1
-                        usage = getattr(resp, "usage", None)
-                        if usage is not None:
-                            tokens_used += int(getattr(usage, "input_tokens", 0) or 0) + int(
-                                getattr(usage, "output_tokens", 0) or 0
-                            )
-                        current_model = await _sync_answering_model(task_id, resp, current_model)
-                        text = _response_text(resp)
-                        if text:
-                            await _emit(task_id, "agent_message", {"content": text})
-                        if ctx.sandbox is not None:
-                            await sbx_mod.keep_alive(ctx.sandbox)
-                        await _update_task(task_id, iterations=iterations, tokens_used=tokens_used)
-
-                        if iterations >= max_iterations:
-                            abort_reason = f"iteration limit reached ({max_iterations}) without finishing"
-                            break
-                        if tokens_used >= token_budget:
-                            abort_reason = f"token budget exhausted ({tokens_used}/{token_budget})"
-                            break
-
-                if abort_reason is None:
                     output = run.result.output
-                    result_summary = output.result_summary if isinstance(output, FinishResult) else str(output or "")
                     final_messages = list(run.result.all_messages())
+                    if isinstance(output, FinishResult):
+                        result_summary = output.result_summary
+                        break
+                    # Plain-text ending: a direct answer finishes chat turns;
+                    # repo turns get one firm nudge to use the finish tool.
+                    result_summary = str(output or "")
+                    if is_chat:
+                        break
+                    round_history = list(final_messages)
+                    round_prompt = (
+                        "That reply did not finish the task. Continue working: when fully complete "
+                        "(changes committed, pushed, PR opened), call the finish tool with a result "
+                        "summary. Do not end with plain text."
+                    )
         except RunCancelled:
             abort_reason = "stopped"
         except _StopRun:
             abort_reason = "stopped"
+        except FallbackExceptionGroup as exc:
+            # Every model in the chain failed — surface each cause, truncated.
+            subs = "; ".join(str(s)[:300] for s in getattr(exc, "exceptions", []) or [exc])
+            await _emit(task_id, "error", {"message": f"LLM error: {subs}"})
+            abort_reason = f"LLM error: {subs}"
         except ModelAPIError as exc:
             await _emit(task_id, "error", {"message": f"LLM error: {exc}"})
             abort_reason = f"LLM error: {exc}"
