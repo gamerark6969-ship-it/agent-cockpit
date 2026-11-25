@@ -1,10 +1,11 @@
 import asyncio
 from typing import Dict, Set
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .models import Event, Task, new_id, utcnow
+from .config import settings
+from .models import Event, Task, utcnow
 
 # In-memory broadcast: task_id -> set of asyncio.Event flags set when new events land.
 _subscribers: Dict[str, Set[asyncio.Event]] = {}
@@ -69,6 +70,13 @@ async def append_event(
             )
             session.add(event)
             await session.flush()
+            expired_ids = (
+                select(Event.id)
+                .where(Event.task_id == task_id)
+                .order_by(Event.seq.desc())
+                .offset(settings.MAX_EVENTS_PER_TASK)
+            )
+            await session.execute(delete(Event).where(Event.id.in_(expired_ids)))
             await session.commit()
             _notify(task_id)
             return event

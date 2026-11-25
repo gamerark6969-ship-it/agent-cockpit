@@ -84,6 +84,7 @@ class DiffFile(BaseModel):
 
 
 class DiffOut(BaseModel):
+    patch: str = ""
     summary: str
     files: List[DiffFile]
 

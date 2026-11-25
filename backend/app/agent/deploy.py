@@ -25,6 +25,7 @@ import httpx
 from ..config import settings
 from ..db import SessionLocal
 from ..models import Artifact, new_id
+from ..preview_security import signed_preview_path
 from .. import sandbox as sbx_mod
 
 log = logging.getLogger("deploy")
@@ -329,7 +330,7 @@ async def deploy_site(ctx, args: dict) -> Tuple[bool, str, Optional[dict]]:
         artifact_id = await _store_artifact(ctx, entry_name, entry)
         base = _public_base()
         if artifact_id and base:
-            artifact_url = f"{base}/s/{artifact_id}"
+            artifact_url = f"{base}{signed_preview_path(artifact_id)}"
 
     url = live_url or persistent_url or artifact_url
     data = {

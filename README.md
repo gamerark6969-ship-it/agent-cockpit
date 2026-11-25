@@ -1,5 +1,18 @@
 # Agent Cockpit — mobile-first autonomous AI software engineer
 
+## YouTube studio and zero-cost cloud runner
+
+The app now includes a **Studio** for original animated Shorts: series briefs, model selection,
+1–3 daily slots, cloud generation/rendering, phone review, automatic publishing, and YouTube OAuth.
+FreeGG, AgentRouter, and Xingchi GPT-6.1 Sol routes can be configured as encrypted connectors.
+OpenCode free models use its real headless client, with a local CPU-model fallback on the cloud runner.
+
+Start with [`docs/ZERO_COST_DEPLOYMENT.md`](docs/ZERO_COST_DEPLOYMENT.md) for the implemented
+Render Free + Neon Free + Supabase Free + public GitHub Actions setup. The scheduled worker also
+supports coding/chat tasks in isolated Docker workspaces. The PWA remains the phone control center.
+
+Cloud account setup and Google channel consent are required to activate real publishing.
+
 Delegate software-engineering tasks to an autonomous agent from your phone. The phone is the
 cockpit; a cloud sandbox is the computer; the LLM is the brain.
 
@@ -12,13 +25,13 @@ cockpit; a cloud sandbox is the computer; the LLM is the brain.
 ```
 
 See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) and [`docs/API.md`](docs/API.md).
-V1 endpoint for a task is **an opened pull request**. Multi-user, deployment, and third-party
-connectors are intentionally out of scope.
+Coding tasks can open pull requests and publish previews. The application is single-user.
 
 ## Layout
 
 ```
 backend/   FastAPI + agent loop (deploy target: Render/Fly/HF Space, Docker)
+           automation + CPU video renderer + scheduled Docker worker
 pwa/       React + Vite + Tailwind PWA (deploy target: Render static / GitHub Pages)
 docs/      architecture + API contract
 ```
@@ -57,6 +70,9 @@ Copy [`.env.example`](.env.example) to `backend/.env`:
 | Key | Purpose |
 |---|---|
 | `APP_TOKEN` | Single-user bearer token. Generate: `python -c "import secrets; print(secrets.token_urlsafe(32))"` |
+| `CONNECTOR_SECRET` | Persistent connector encryption secret. Required in production and must differ from `APP_TOKEN` |
+| `ENVIRONMENT` | Set to `production` to enforce persistent, separate secrets and explicit CORS origins |
+| `CORS_ORIGINS` | Comma-separated browser origins allowed to call the API |
 | `AGENTROUTER_BASE_URL` | OpenAI-compatible base URL, e.g. `https://.../v1` |
 | `AGENTROUTER_API_KEY` | Your agentrouter proxy key |
 | `AGENTROUTER_DEFAULT_MODEL` | Default model id |
@@ -69,6 +85,10 @@ Copy [`.env.example`](.env.example) to `backend/.env`:
 | `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` / `VAPID_SUBJECT` | Web Push. Generate with `npx web-push generate-vapid-keys` |
 
 ## Deploying for ₹0
+
+For daily production, use the bounded scheduled worker described in
+[`docs/ZERO_COST_DEPLOYMENT.md`](docs/ZERO_COST_DEPLOYMENT.md); it persists jobs/media independently
+of the sleeping API. The generic API/sandbox choices below are also available for development.
 
 - **Backend** → Render free web service (Docker or the included `render.yaml`). Reads `$PORT` and
   `RENDER_EXTERNAL_URL`. Free instances sleep after ~15 min idle and cold-start in ~1 min; keep it

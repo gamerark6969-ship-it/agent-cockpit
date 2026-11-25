@@ -4,13 +4,14 @@ import logging
 from datetime import datetime, timezone
 
 import sqlalchemy as sa
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .. import connectors as connectors_mod
 from .. import sandbox as sbx_mod
+from ..config import settings
 from ..db import SessionLocal, get_settings_data, save_settings
 from ..events import subscribe, unsubscribe
 from ..agent.models import (
@@ -28,6 +29,7 @@ from ..models import (
     Task,
     utcnow,
 )
+from ..preview_security import enforce_preview_rate_limit, verify_preview_signature
 from ..schemas import (
     ApprovalDecision,
     ApprovalOut,
@@ -58,6 +60,7 @@ router = APIRouter(dependencies=[Depends(require_token)])
 
 TERMINAL_STATUSES = {"done", "failed", "stopped"}
 ACTIVE_STATUSES = {"queued", "running", "awaiting_approval"}
+_task_creation_lock = asyncio.Lock()
 
 
 def get_worker():
@@ -185,22 +188,39 @@ def _task_out(t: Task) -> TaskOut:
 @router.post("/api/projects/{project_id}/tasks", response_model=TaskOut, status_code=201)
 async def create_task(project_id: str, body: TaskCreate):
     worker = get_worker()
-    async with SessionLocal() as session:
-        settings_data = await get_settings_data(session)
-    async with SessionLocal() as session:
-        project = await session.get(Project, project_id)
-        if project is None:
-            raise HTTPException(status_code=404, detail="project not found")
-        task = Task(
-            project_id=project_id,
-            prompt=body.prompt,
-            status="queued",
-            model=body.model or str(settings_data.get("default_model") or DEFAULT_TASK_MODEL),
-        )
-        session.add(task)
-        await session.commit()
-        await session.refresh(task)
-    worker.enqueue(task.id)
+    async with _task_creation_lock:
+        async with SessionLocal() as session:
+            settings_data = await get_settings_data(session)
+            project = await session.get(Project, project_id)
+            if project is None:
+                raise HTTPException(status_code=404, detail="project not found")
+            active_count = await session.scalar(
+                select(sa.func.count())
+                .select_from(Task)
+                .where(Task.status.in_(ACTIVE_STATUSES))
+            )
+            if active_count >= settings.MAX_ACTIVE_TASKS:
+                raise HTTPException(
+                    status_code=429,
+                    detail=(
+                        "maximum active-task limit reached "
+                        f"({settings.MAX_ACTIVE_TASKS}); finish or stop a task before creating another"
+                    ),
+                )
+            task = Task(
+                project_id=project_id,
+                prompt=body.prompt,
+                status="queued",
+                model=body.model or str(settings_data.get("default_model") or DEFAULT_TASK_MODEL),
+            )
+            session.add(task)
+            await session.commit()
+            await session.refresh(task)
+    if settings.BACKGROUND_WORKER_ENABLED:
+        worker.enqueue(task.id)
+    else:
+        from ..automation.dispatch import dispatch_worker
+        await dispatch_worker()
     return _task_out(task)
 
 
@@ -243,6 +263,10 @@ async def stop_task(task_id: str):
     if task.status == "stopped":
         await _emit_event(task_id, "task_stopped", {"reason": "stopped via API"})
         return Response(status_code=202)
+    from ..models import TaskControl
+    async with SessionLocal() as session:
+        session.add(TaskControl(task_id=task_id,kind="stop"))
+        await session.commit()
     worker.request_stop(task_id)
     return Response(status_code=202)
 
@@ -256,9 +280,10 @@ async def steer_task(task_id: str, body: SteerRequest):
             raise HTTPException(status_code=404, detail="task not found")
         if task.status != "running":
             raise HTTPException(status_code=409, detail=f"cannot steer a task in status '{task.status}' (must be running)")
-    if not worker.is_active(task_id):
-        raise HTTPException(status_code=409, detail="task is not active in the worker")
-    worker.steer(task_id, body.message)
+    from ..models import TaskControl
+    async with SessionLocal() as session:
+        session.add(TaskControl(task_id=task_id,kind="steer",message=body.message))
+        await session.commit()
     return Response(status_code=202)
 
 
@@ -350,6 +375,10 @@ async def get_diff(task_id: str):
         project = await session.get(Project, task.project_id)
         base = project.default_branch if project else "main"
         sandbox_id = task.sandbox_id
+        saved = await session.scalar(select(Artifact).where(Artifact.task_id == task_id,Artifact.kind == "diff").order_by(Artifact.created_at.desc()).limit(1))
+        if saved is not None:
+            import json
+            return DiffOut(**json.loads(saved.data))
     if not sandbox_id or not sbx_mod.settings.E2B_API_KEY:
         return DiffOut(summary="", files=[])
     try:
@@ -425,11 +454,23 @@ async def get_artifact(artifact_id: str):
 
 
 @public_router.get("/s/{artifact_id}")
-async def serve_site(artifact_id: str):
-    """Unauthenticated fallback host for sites published by deploy_site."""
+async def serve_site(
+    artifact_id: str,
+    request: Request,
+    expires: int = Query(...),
+    signature: str = Query(...),
+):
+    """Serve a signed, expiring fallback site preview.
+
+    Only artifacts published by deploy_site (kind == "site") are served here;
+    screenshots and other task artifacts must go through the authenticated
+    /api/artifacts endpoint.
+    """
+    enforce_preview_rate_limit(request)
+    verify_preview_signature(artifact_id, expires, signature)
     async with SessionLocal() as session:
         artifact = await session.get(Artifact, artifact_id)
-        if artifact is None:
+        if artifact is None or (artifact.kind or "") != "site":
             raise HTTPException(status_code=404, detail="site not found")
         data = artifact.data
         mime = artifact.mime or "text/html"
@@ -437,7 +478,11 @@ async def serve_site(artifact_id: str):
     return Response(
         content=data,
         media_type=mime,
-        headers={"Content-Disposition": f'inline; filename="{filename}"'},
+        headers={
+            "Content-Disposition": f'inline; filename="{filename}"',
+            "Cache-Control": "no-store",
+            "X-Robots-Tag": "noindex, nofollow",
+        },
     )
 
 
@@ -574,17 +619,23 @@ async def list_connectors():
 async def create_connector(body: ConnectorCreate):
     if body.kind not in connectors_mod.KNOWN_KINDS:
         raise HTTPException(status_code=422, detail=f"unknown connector kind '{body.kind}'")
-    connector = await connectors_mod.upsert(
-        body.kind, name=body.name, config=body.config, enabled=body.enabled
-    )
+    try:
+        connector = await connectors_mod.upsert(
+            body.kind, name=body.name, config=body.config, enabled=body.enabled
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
     return ConnectorOut(**connectors_mod.to_out(connector))
 
 
 @router.put("/api/connectors/{connector_id}", response_model=ConnectorOut)
 async def update_connector(connector_id: str, body: ConnectorUpdate):
-    connector = await connectors_mod.update(
-        connector_id, name=body.name, config=body.config, enabled=body.enabled
-    )
+    try:
+        connector = await connectors_mod.update(
+            connector_id, name=body.name, config=body.config, enabled=body.enabled
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
     if connector is None:
         raise HTTPException(status_code=404, detail="connector not found")
     return ConnectorOut(**connectors_mod.to_out(connector))

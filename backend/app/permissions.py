@@ -13,7 +13,11 @@ def _bash_rules(settings_data: dict) -> list:
     rules = perms.get("bash_rules", [])
     out = []
     for r in rules or []:
-        if isinstance(r, dict) and r.get("match") and r.get("level"):
+        if (
+            isinstance(r, dict)
+            and r.get("match")
+            and r.get("level") in ("auto", "ask", "deny")
+        ):
             out.append((str(r["match"]), str(r["level"])))
     return out
 
@@ -33,7 +37,7 @@ def evaluate(tool: str, args: Optional[dict], settings_data: dict) -> str:
         for match, level in _bash_rules(settings_data):
             if fnmatch.fnmatchcase(command, match):
                 return level
-        return "auto"
+        return "ask"
 
     levels = _tool_levels(settings_data)
     # exact match first, then glob patterns
@@ -53,4 +57,4 @@ def evaluate(tool: str, args: Optional[dict], settings_data: dict) -> str:
         return "auto"
     if tool == "web_fetch":
         return "auto"
-    return "auto"
+    return "ask"

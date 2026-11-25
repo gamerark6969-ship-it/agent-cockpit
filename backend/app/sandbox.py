@@ -27,6 +27,11 @@ def mask_secrets(text: str) -> str:
     pat = settings.GITHUB_PAT
     if pat and len(pat) > 4 and pat in text:
         text = text.replace(pat, "***")
+    from .agent.provider_store import runtime_routes
+    for route in runtime_routes.values():
+        token = route.get("api_key")
+        if token and len(token) > 4:
+            text = text.replace(token, "***")
     for rx in _TOKEN_PATTERNS:
         text = rx.sub("***", text)
     return text
@@ -84,6 +89,24 @@ def _glob_to_regex(pattern: str) -> str:
 
 async def create_task_sandbox(task_id: str, repo_url: str, default_branch: str = "main") -> AsyncSandbox:
     """Create a sandbox, clone the repo (token never logged), set up git identity."""
+    if settings.SANDBOX_BACKEND == "docker":
+        from .docker_sandbox import create_sandbox
+        try:
+            envs = await _sandbox_envs()
+            sbx = await create_sandbox(task_id,envs)
+            setup = "set -e; git config --global user.email agent@example.com; git config --global user.name 'AI Agent'; "
+            if envs.get("GITHUB_PAT"):
+                setup += "printf '#!/bin/sh\\necho \"$GITHUB_PAT\"\\n' > /tmp/git-askpass; chmod +x /tmp/git-askpass; git config --global core.askpass /tmp/git-askpass; "
+            setup += f"git clone {_sh(repo_url)} {_sh(REPO_DIR)}; cd {_sh(REPO_DIR)}; git checkout {_sh(default_branch)}"
+            result = await sbx.commands.run(setup,timeout=600)
+            if result.exit_code:
+                await sbx.kill()
+                raise SandboxError("Repository clone/setup failed in the cloud workspace")
+            return sbx
+        except SandboxError:
+            raise
+        except Exception:
+            raise SandboxUnavailable("Docker cloud workspace is unavailable") from None
     key = _require_key()
     envs = {"GIT_TERMINAL_PROMPT": "0"}
     pat = settings.GITHUB_PAT
@@ -141,6 +164,9 @@ async def create_task_sandbox(task_id: str, repo_url: str, default_branch: str =
 async def _sandbox_envs() -> dict:
     envs = {"GIT_TERMINAL_PROMPT": "0"}
     pat = settings.GITHUB_PAT
+    if not pat:
+        from .connectors import get_config
+        pat = (await get_config("github")).get("pat")
     if pat:
         envs["GITHUB_PAT"] = pat
         envs["GITHUB_TOKEN"] = pat
@@ -149,6 +175,14 @@ async def _sandbox_envs() -> dict:
 
 async def create_scratch_sandbox(task_id: str) -> AsyncSandbox:
     """Create a sandbox with no repository: a general-purpose Linux workspace for chat tasks."""
+    if settings.SANDBOX_BACKEND == "docker":
+        from .docker_sandbox import create_sandbox
+        try:
+            sbx = await create_sandbox(task_id,await _sandbox_envs())
+            await sbx.commands.run(f"mkdir -p {_sh(WORK_DIR)}; git config --global user.email agent@example.com; git config --global user.name 'AI Agent'",timeout=20)
+            return sbx
+        except Exception:
+            raise SandboxUnavailable("Docker cloud workspace is unavailable") from None
     key = _require_key()
     envs = await _sandbox_envs()
     try:
@@ -181,6 +215,12 @@ async def create_scratch_sandbox(task_id: str) -> AsyncSandbox:
 
 async def connect(sandbox_id: str) -> AsyncSandbox:
     """Reconnect to an existing sandbox. Raises SandboxError if it is dead."""
+    if sandbox_id.startswith("docker:"):
+        from .docker_sandbox import connect_sandbox
+        try:
+            return await connect_sandbox(sandbox_id)
+        except Exception:
+            raise SandboxUnavailable("The cloud workspace has expired") from None
     key = _require_key()
     try:
         sbx = await AsyncSandbox.connect(sandbox_id, api_key=key, timeout=settings.SANDBOX_TIMEOUT_S)
@@ -202,12 +242,20 @@ async def keep_alive(sbx: AsyncSandbox, seconds: Optional[int] = None) -> None:
         pass
 
 
-async def kill(sandbox_id: str) -> None:
+async def kill(sandbox_id: str) -> bool:
+    if sandbox_id.startswith("docker:"):
+        from .docker_sandbox import DockerSandbox
+        try:
+            await DockerSandbox(sandbox_id.removeprefix("docker:")).kill()
+            return True
+        except Exception:
+            return False
     try:
         sbx = await AsyncSandbox.connect(sandbox_id, api_key=_require_key())
         await sbx.kill()
+        return True
     except Exception:
-        pass
+        return False
 
 
 async def run_command(sbx: AsyncSandbox, cmd: str, timeout: int = 300) -> dict:

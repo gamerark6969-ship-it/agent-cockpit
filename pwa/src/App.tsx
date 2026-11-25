@@ -11,6 +11,7 @@ import ProjectDetail from "./pages/ProjectDetail";
 import Projects from "./pages/Projects";
 import SettingsPage from "./pages/SettingsPage";
 import TaskMonitor from "./pages/TaskMonitor";
+import Automation from "./pages/Automation";
 
 function RequireAuth({ children }: { children: ReactNode }) {
   if (!getToken()) return <Navigate to="/login" replace />;
@@ -21,7 +22,7 @@ function Shell() {
   const location = useLocation();
   const hideNav = location.pathname === "/login";
   return (
-    <div className="mx-auto min-h-dvh max-w-md bg-canvas text-fg">
+    <div className={`${location.pathname === "/studio" ? "max-w-none" : "mx-auto max-w-md"} min-h-dvh bg-canvas text-fg`}>
       <div className={hideNav ? "" : "pb-nav"}>
         <Routes>
           <Route path="/login" element={<Login />} />
@@ -78,6 +79,14 @@ function Shell() {
             element={
               <RequireAuth>
                 <Approvals />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/studio"
+            element={
+              <RequireAuth>
+                <Automation />
               </RequireAuth>
             }
           />

@@ -58,6 +58,8 @@ class Task(Base):
     result_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Full pydantic-ai conversation dump (JSON) so a restarted task resumes its tool trace.
     pa_history: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    lease_owner: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
@@ -75,6 +77,17 @@ class Event(Base):
     type: Mapped[str] = mapped_column(String(64), nullable=False)
     payload: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class TaskControl(Base):
+    __tablename__ = "task_controls"
+
+    id: Mapped[str] = mapped_column(String(36),primary_key=True,default=new_id)
+    task_id: Mapped[str] = mapped_column(String(36),ForeignKey("tasks.id",ondelete="CASCADE"),index=True)
+    kind: Mapped[str] = mapped_column(String(16),nullable=False)
+    message: Mapped[str] = mapped_column(Text,nullable=False,default="")
+    processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True),nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True),default=utcnow)
 
 
 class Message(Base):

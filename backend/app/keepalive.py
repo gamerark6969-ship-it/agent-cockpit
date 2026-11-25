@@ -18,6 +18,8 @@ def _target_url() -> str | None:
 
 
 async def keepalive_loop() -> None:
+    if os.environ.get("KEEPALIVE_ENABLED", "true").lower() in ("false", "0", "no"):
+        return
     url = _target_url()
     if not url:
         log.info("keepalive disabled (no RENDER_EXTERNAL_URL/PUBLIC_BASE_URL set)")

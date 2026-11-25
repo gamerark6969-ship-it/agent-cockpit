@@ -25,6 +25,19 @@ interface CatalogItem {
 }
 
 const CATALOG: CatalogItem[] = [
+  ...[
+    ["freegg", "FreeGG · GPT-6.1 Sol", "https://freegg.app/v1"],
+    ["agentrouter-openai", "AgentRouter · GPT-6.1 Sol", "https://agentrouter.org/v1"],
+    ["agentrouter-openai-two", "AgentRouter Two · GPT-6.1 Sol", "https://agentrouter.org/v1"],
+    ["xingchi", "Xingchi · GPT-6.1 Sol", "https://api.xingchiapi.com/v1"],
+    ["xingchi2", "Xingchi 2 · GPT-6.1 Sol", "https://api.xingchiapi.com/v1"],
+  ].map(([kind,title,url]) => ({
+    kind, title, blurb: "OpenAI Responses model route. Credentials are encrypted on the backend.",
+    fields: [
+      { key: "api_key", label: "API key", placeholder: "API key (leave blank to keep the saved key)", type: "password" },
+      { key: "base_url", label: "API base URL", placeholder: url },
+    ],
+  })),
   {
     kind: "github",
     title: "GitHub",
@@ -211,6 +224,7 @@ export default function Connectors() {
                         key={f.key}
                         className={inputBase}
                         type={f.type || "text"}
+                        aria-label={f.label}
                         placeholder={f.placeholder || f.label}
                         value={values[f.key] || ""}
                         onChange={(e) => setValues((v) => ({ ...v, [f.key]: e.target.value }))}

@@ -315,6 +315,11 @@ def _norm_model(name: str) -> str:
 
 async def _sync_answering_model(task_id: str, resp: ModelResponse, current: str) -> str:
     actual = getattr(resp, "model_name", None)
+    from .provider_store import PROVIDER_DEFAULTS
+    if current.split("/",1)[0] in PROVIDER_DEFAULTS or current.startswith("opencode/"):
+        return current  # These pinned routes never fall back; retain the configured alias.
+    if actual and current.endswith("/"+actual):
+        return current  # Keep the provider route so a restarted task can rebuild it.
     if actual and _norm_model(actual) != _norm_model(current):
         await _emit(task_id, "model_switch", {"from": current, "to": actual})
         await _update_task(task_id, model=actual)
@@ -421,8 +426,9 @@ async def _history_processor(
     """Runs before every model request: inject steering + nudge, then compact."""
     deps = ctx.deps
     injected: List[ModelMessage] = []
+    controls = await deps.worker.read_steer_controls(deps.task_id)
 
-    for text in deps.worker.drain_steer(deps.task_id):
+    for text in [*deps.worker.drain_steer(deps.task_id),*(message for _,message in controls)]:
         text = (text or "").strip()
         if not text:
             continue
@@ -442,7 +448,12 @@ async def _history_processor(
         injected.append(ModelRequest(parts=[UserPromptPart(content=f"[System reminder] {nudge}")]))
 
     combined = messages + injected if injected else messages
-    return await _compact_messages(deps, combined)
+    compacted = await _compact_messages(deps, combined)
+    deps.live_history = compacted
+    serialized = json.loads(ModelMessagesTypeAdapter.dump_json(compacted))
+    if not await deps.worker.checkpoint_history(deps.task_id,serialized,[identifier for identifier,_ in controls]):
+        raise asyncio.CancelledError()
+    return compacted
 
 
 # ── the loop ─────────────────────────────────────────────
@@ -597,7 +608,14 @@ async def run_agent_loop(task_id: str, worker) -> None:
         token = CancellationToken()
 
         async def _watch_stop() -> None:
-            await stop_event.wait()
+            while not stop_event.is_set():
+                if await worker.stop_requested_in_db(task_id):
+                    stop_event.set()
+                    break
+                try:
+                    await asyncio.wait_for(stop_event.wait(),timeout=2)
+                except asyncio.TimeoutError:
+                    pass
             token.cancel()
 
         watcher = asyncio.create_task(_watch_stop())
@@ -697,6 +715,7 @@ async def run_agent_loop(task_id: str, worker) -> None:
             abort_reason = f"internal error: {type(exc).__name__}: {exc}"
         finally:
             watcher.cancel()
+            await asyncio.gather(watcher,return_exceptions=True)
             try:
                 await deltas.flush()
             except Exception:
@@ -704,7 +723,7 @@ async def run_agent_loop(task_id: str, worker) -> None:
 
         # persist the conversation so a restart can resume it. When we compacted
         # mid-run, persist the compacted (small) view instead of the full trace.
-        to_persist = deps.live_history if (deps.compaction_count and deps.live_history) else final_messages
+        to_persist = (deps.live_history or final_messages) if abort_reason else final_messages
         if to_persist:
             try:
                 serialized = json.loads(ModelMessagesTypeAdapter.dump_json(to_persist))
@@ -740,4 +759,7 @@ async def run_agent_loop(task_id: str, worker) -> None:
         await _finish_failed(task_id, f"internal error: {type(exc).__name__}: {exc}")
     finally:
         active_sbx = ctx.sandbox if ctx is not None else sbx
+        if not is_chat:
+            from .diff_snapshot import save_diff_snapshot
+            await save_diff_snapshot(task_id,active_sbx,project.default_branch,worker.worker_id)
         await _release_sandbox_after_terminal(task_id, active_sbx, is_chat)

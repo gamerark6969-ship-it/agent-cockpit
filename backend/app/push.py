@@ -41,8 +41,9 @@ async def send_push_to_all(payload: dict) -> None:
                     },
                     data=data,
                     vapid_private_key=settings.VAPID_PRIVATE_KEY,
-                    vapid_public_key=settings.VAPID_PUBLIC_KEY,
                     vapid_claims={"sub": subject},
+                    timeout=10,
+                    ttl=86400,
                 )
             except WebPushException as exc:
                 status = None

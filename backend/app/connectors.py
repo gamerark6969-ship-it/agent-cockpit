@@ -10,7 +10,7 @@ from .models import Connector, new_id, utcnow
 
 log = logging.getLogger("connectors")
 
-KNOWN_KINDS = ("github", "gmail", "slack", "notion", "google")
+KNOWN_KINDS = ("github", "gmail", "slack", "notion", "google", "freegg", "agentrouter-openai", "agentrouter-openai-two", "xingchi", "xingchi2")
 
 DEFAULT_NAMES = {
     "github": "GitHub",
@@ -18,6 +18,11 @@ DEFAULT_NAMES = {
     "slack": "Slack",
     "notion": "Notion",
     "google": "Google Calendar & Drive",
+    "freegg": "FreeGG · GPT-6.1 Sol",
+    "agentrouter-openai": "AgentRouter · GPT-6.1 Sol",
+    "agentrouter-openai-two": "AgentRouter Two · GPT-6.1 Sol",
+    "xingchi": "Xingchi · GPT-6.1 Sol",
+    "xingchi2": "Xingchi 2 · GPT-6.1 Sol",
 }
 
 
@@ -74,6 +79,9 @@ async def upsert(
     config: Optional[Dict[str, Any]] = None,
     enabled: bool = True,
 ) -> Connector:
+    from .agent.provider_store import PROVIDER_DEFAULTS, validate_provider_config
+    if kind in PROVIDER_DEFAULTS and config is not None:
+        config = validate_provider_config(kind,config)
     async with SessionLocal() as session:
         connector = (
             await session.execute(select(Connector).where(Connector.kind == kind))
@@ -98,6 +106,9 @@ async def upsert(
             connector.updated_at = utcnow()
         await session.commit()
         await session.refresh(connector)
+    if kind in PROVIDER_DEFAULTS:
+        from .agent.provider_store import refresh_provider_routes
+        await refresh_provider_routes()
     return connector
 
 
@@ -117,12 +128,17 @@ async def update(
         if config is not None:
             merged = decrypt_json(connector.config_enc)
             merged.update(config)
+            from .agent.provider_store import PROVIDER_DEFAULTS, validate_provider_config
+            if connector.kind in PROVIDER_DEFAULTS:
+                merged = validate_provider_config(connector.kind,merged)
             connector.config_enc = encrypt_json(merged)
         if enabled is not None:
             connector.enabled = enabled
         connector.updated_at = utcnow()
         await session.commit()
         await session.refresh(connector)
+    from .agent.provider_store import refresh_provider_routes
+    await refresh_provider_routes()
     return connector
 
 
@@ -133,6 +149,8 @@ async def delete(connector_id: str) -> bool:
             return False
         await session.delete(connector)
         await session.commit()
+    from .agent.provider_store import refresh_provider_routes
+    await refresh_provider_routes()
     return True
 
 

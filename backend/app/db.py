@@ -19,10 +19,11 @@ async def get_session():
 
 def _default_settings() -> dict:
     from .schemas import SettingsOut
-    from .agent.models import PA_DEFAULT_MODEL
+    from .agent.models import PA_DEFAULT_MODEL, list_pa_models
 
     data = SettingsOut().model_dump()
-    data["default_model"] = PA_DEFAULT_MODEL
+    models = list_pa_models()
+    data["default_model"] = models[0] if models else PA_DEFAULT_MODEL
     return data
 
 
@@ -35,6 +36,10 @@ async def get_settings_data(session) -> dict:
     stored = dict(row.data) if row is not None and row.data else {}
     defaults = _default_settings()
     merged = {**defaults, **stored}
+    from .agent.models import list_pa_models
+    available = list_pa_models()
+    if available and merged.get("default_model") == "deepseek-v4.1-flash" and "deepseek-v4.1-flash" not in available:
+        merged["default_model"] = available[0]
     merged["permissions"] = {
         **defaults["permissions"],
         **(stored.get("permissions") or {}),
@@ -54,6 +59,12 @@ async def seed_settings() -> None:
         # One-time migration: the old default (50) capped long, multi-file tasks.
         # Only bump it when it still holds the legacy default.
         data = dict(row.data or {})
+        from .agent.models import list_pa_models
+        available_models = list_pa_models()
+        if available_models and data.get("default_model") == "deepseek-v4.1-flash" and "deepseek-v4.1-flash" not in available_models:
+            data["default_model"] = available_models[0]
+            row.data = data
+            await session.commit()
         if data.get("max_iterations") in (None, 50):
             data["max_iterations"] = _default_settings()["max_iterations"]
             row.data = data

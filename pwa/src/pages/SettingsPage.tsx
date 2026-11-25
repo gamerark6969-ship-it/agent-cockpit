@@ -9,7 +9,7 @@ import {
   type AppSettings,
   type BashRule,
 } from "../lib/api";
-import { enablePush, notificationPermission, pushSupported } from "../lib/push";
+import { enablePush, disablePush, notificationPermission, pushSupported } from "../lib/push";
 import Spinner from "../components/Spinner";
 import { PlusIcon, TrashIcon } from "../components/Icons";
 import { btnGhost, btnPrimary, card, inputBase, label } from "../lib/ui";
@@ -121,6 +121,13 @@ export default function SettingsPage() {
     }
   };
 
+  const doDisablePush = async () => {
+    setEnablingPush(true);
+    try { setPushMessage((await disablePush()).message); }
+    catch (err) { setPushMessage(err instanceof Error ? err.message : "Failed to disable push"); }
+    finally { setEnablingPush(false); }
+  };
+
   const permission = notificationPermission();
 
   if (loading) {
@@ -191,6 +198,9 @@ export default function SettingsPage() {
         >
           {enablingPush ? <Spinner className="h-4 w-4" /> : null}
           Enable notifications on this device
+        </button>
+        <button className={`${btnGhost} mt-2`} disabled={enablingPush} onClick={() => void doDisablePush()}>
+          Disable notifications on this device
         </button>
         <p className="mt-2 text-[11px] text-faint">
           On iOS, add this app to your home screen first (Share → Add to Home Screen).

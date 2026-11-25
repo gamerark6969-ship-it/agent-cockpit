@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { NavLink } from "react-router-dom";
 import { listApprovals } from "../lib/api";
-import { ChatIcon, PlugIcon, SettingsIcon, WarningIcon } from "./Icons";
+import { ChatIcon, PlugIcon, SettingsIcon, VideoIcon, WarningIcon } from "./Icons";
 
 const itemBase =
   "relative flex flex-1 flex-col items-center justify-center gap-1 rounded-lg py-2 text-[11px] font-medium transition-colors";
@@ -40,6 +40,10 @@ export default function BottomNav() {
         <NavLink to="/connectors" className={({ isActive }) => cls(isActive)}>
           <PlugIcon className="h-5 w-5" />
           Connectors
+        </NavLink>
+        <NavLink to="/studio" className={({ isActive }) => cls(isActive)}>
+          <VideoIcon className="h-5 w-5" />
+          Studio
         </NavLink>
         <NavLink to="/approvals" className={({ isActive }) => cls(isActive)}>
           <span className="relative">

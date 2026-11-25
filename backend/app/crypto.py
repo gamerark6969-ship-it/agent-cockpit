@@ -11,11 +11,7 @@ _SECRET_KEY_HINTS = ("password", "token", "secret", "key", "pat", "api_key", "ac
 
 
 def _fernet() -> Fernet:
-    seed = (
-        settings.CONNECTOR_SECRET
-        or settings.APP_TOKEN
-        or "agent-cockpit-insecure-default"
-    ).encode("utf-8")
+    seed = (settings.CONNECTOR_SECRET or settings.APP_TOKEN).encode("utf-8")
     key = base64.urlsafe_b64encode(hashlib.sha256(seed).digest())
     return Fernet(key)
 

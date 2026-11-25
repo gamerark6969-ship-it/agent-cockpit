@@ -15,13 +15,14 @@ pydantic-ai instead of us re-implementing them.
 from __future__ import annotations
 
 import logging
+import shutil
 from functools import lru_cache
 from typing import List, Optional
 
 from pydantic_ai.models import Model
 from pydantic_ai.models.fallback import FallbackModel
 from pydantic_ai.models.google import GoogleModel
-from pydantic_ai.models.openai import OpenAIChatModel
+from pydantic_ai.models.openai import OpenAIChatModel, OpenAIResponsesModel
 from pydantic_ai.providers.google import GoogleProvider
 from pydantic_ai.providers.openai import OpenAIProvider
 
@@ -55,11 +56,21 @@ MODEL_CATALOG = [PA_DEFAULT_MODEL, *GEMINI_MODEL_CATALOG]
 def list_pa_models() -> List[str]:
     """Model ids to surface in the app, filtered by configured providers."""
     out: List[str] = []
+    from .provider_store import runtime_routes
+    if settings.FREEGG_API_KEY:
+        out.append("freegg/gpt-6.1-sol")
+    out.extend(name for name in sorted(runtime_routes,key=lambda name: (not name.startswith("freegg/"),name)) if name not in out)
+    if settings.AGENTROUTER_OPENAI_API_KEY:
+        out.append("agentrouter-openai/gpt-6.1-sol")
+    if settings.XINGCHI_BASE_URL and settings.XINGCHI_API_KEY:
+        out.append("xingchi2/gpt-6.1-sol")
+    if settings.OPENCODE_API_KEY:
+        out.append("opencode/gpt-6.1-sol")
     if settings.BAI_API_KEY:
         out.extend([m for m in BAI_MODELS if m not in out])
     if settings.AGENTROUTER_API_KEY:
         out.extend([m for m in GEMINI_MODEL_CATALOG if m not in out])
-    return out
+    return list(dict.fromkeys(out))
 
 
 def _is_bai_model(name: str) -> bool:
@@ -74,6 +85,27 @@ def _is_gemini_model(name: str) -> bool:
 @lru_cache(maxsize=32)
 def build_single_model(name: str) -> Optional[Model]:
     """Construct one provider-backed model, or None if its key is missing."""
+    from .provider_store import runtime_routes
+    route = runtime_routes.get(name)
+    if name == "freegg/gpt-6.1-sol" and settings.FREEGG_API_KEY:
+        route = {"base_url":settings.FREEGG_BASE_URL, "api_key":settings.FREEGG_API_KEY, "api_style":"responses"}
+    elif name == "agentrouter-openai/gpt-6.1-sol" and settings.AGENTROUTER_OPENAI_API_KEY:
+        route = {"base_url":settings.AGENTROUTER_OPENAI_BASE_URL, "api_key":settings.AGENTROUTER_OPENAI_API_KEY, "api_style":"responses"}
+    if route:
+        provider = OpenAIProvider(base_url=route["base_url"],api_key=route["api_key"])
+        factory = OpenAIChatModel if route["api_style"] == "chat" else OpenAIResponsesModel
+        return factory(name.split("/",1)[1],provider=provider,settings={"max_tokens":8192,"openai_reasoning_effort":"low"} if route["api_style"] == "responses" else {"max_tokens":8192})
+    if name.startswith(("xingchi2/", "xingchi/")):
+        if not settings.XINGCHI_BASE_URL or not settings.XINGCHI_API_KEY:
+            return None
+        provider = OpenAIProvider(base_url=settings.XINGCHI_BASE_URL, api_key=settings.XINGCHI_API_KEY)
+        factory = OpenAIChatModel if settings.XINGCHI_API_STYLE == "chat" else OpenAIResponsesModel
+        return factory(name.split("/", 1)[1], provider=provider)
+    if name == "opencode/gpt-6.1-sol":
+        if not settings.OPENCODE_API_KEY:
+            return None
+        return OpenAIResponsesModel("gpt-6.1-sol", provider=OpenAIProvider(
+            base_url=settings.OPENCODE_BASE_URL, api_key=settings.OPENCODE_API_KEY))
     if _is_bai_model(name):
         if not settings.BAI_API_KEY:
             log.warning("BAI_API_KEY not configured; cannot use %r", name)
@@ -99,7 +131,8 @@ def build_single_model(name: str) -> Optional[Model]:
 
 def build_model_chain(primary: str) -> Optional[Model]:
     """Primary model + configured fallbacks as a single pydantic-ai Model."""
-    chain: List[str] = [primary] + [m for m in PA_FALLBACK_MODELS if m != primary]
+    # Explicit new providers never silently fall back to an unrelated paid route.
+    chain: List[str] = [primary] if "/" in primary and not primary.startswith("models/") else [primary] + [m for m in PA_FALLBACK_MODELS if m != primary]
     models = [m for m in (build_single_model(name) for name in chain) if m is not None]
     if not models:
         return None
@@ -109,4 +142,54 @@ def build_model_chain(primary: str) -> Optional[Model]:
 
 
 def any_configured() -> bool:
-    return any(build_single_model(name) is not None for name in PA_FALLBACK_MODELS)
+    return bool(list_pa_models())
+
+
+FREE_MODELS = ("opencode/deepseek-v4.1-flash-free", "opencode/big-pickle", "opencode/mimo-v2.6-flash-free", "opencode/beam-free", "opencode/nemotron-3.5-lightning-free")
+
+
+def list_generation_models() -> List[str]:
+    """Free models use the real OpenCode client, not a spoofed gateway request."""
+    local = [f"local/{settings.LOCAL_LLM_MODEL}"] if settings.LOCAL_LLM_ENABLED or settings.LOCAL_LLM_REMOTE_WORKER else []
+    return [*(FREE_MODELS if settings.OPENCODE_REMOTE_WORKER or shutil.which(settings.OPENCODE_BIN) else ()), *local, *list_pa_models()]
+
+
+async def generate_text(prompt: str, model: str | None = None, system_prompt: str = "") -> str:
+    from .opencode_runtime import FreeModelUnavailable, run_free_model
+    from .local_inference import generate_local
+
+    if model is None and "freegg/gpt-6.1-sol" in list_pa_models():
+        try:
+            return await generate_text(prompt,model="freegg/gpt-6.1-sol",system_prompt=system_prompt)
+        except Exception:
+            # FreeGG can be unavailable too; the remaining automatic routes cost no money.
+            pass
+
+    selected = model or (FREE_MODELS[0] if shutil.which(settings.OPENCODE_BIN) else None)
+    if selected == f"local/{settings.LOCAL_LLM_MODEL}":
+        return await generate_local(prompt, system_prompt)
+    if selected in FREE_MODELS:
+        try:
+            return await run_free_model(selected, f"{system_prompt}\n\n{prompt}")
+        except FreeModelUnavailable:
+            if model is not None or not settings.LOCAL_LLM_ENABLED:
+                raise
+            return await generate_local(prompt, system_prompt)
+    if not selected:
+        if settings.LOCAL_LLM_ENABLED:
+            return await generate_local(prompt, system_prompt)
+        raise RuntimeError("Install OpenCode to use free models, or explicitly select a configured provider")
+    if selected not in list_pa_models():
+        raise RuntimeError("The selected model is not configured")
+    from pydantic_ai import Agent
+
+    backed = build_single_model(selected)
+    if backed is None:
+        raise RuntimeError("The selected model is unavailable")
+    import asyncio
+    async with asyncio.timeout(settings.GENERATION_TIMEOUT_S):
+        model_settings = {"max_tokens":8192}
+        if selected.endswith("/gpt-6.1-sol"):
+            model_settings["openai_reasoning_effort"] = "low"
+        async with Agent(backed, system_prompt=system_prompt, model_settings=model_settings).run_stream(prompt) as result:
+            return str(await result.get_output())

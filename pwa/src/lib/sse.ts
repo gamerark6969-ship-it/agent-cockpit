@@ -78,7 +78,7 @@ export function streamTaskEvents(taskId: string, opts: StreamOptions): StreamHan
       for (;;) {
         const { value, done } = await reader.read();
         if (done) break;
-        buffer += decoder.decode(value, { stream: true });
+        buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, "\n");
         let idx = buffer.indexOf("\n\n");
         while (idx !== -1) {
           const chunk = buffer.slice(0, idx);
@@ -87,6 +87,8 @@ export function streamTaskEvents(taskId: string, opts: StreamOptions): StreamHan
           idx = buffer.indexOf("\n\n");
         }
       }
+      buffer += decoder.decode();
+      if (buffer.trim()) handleChunk(buffer);
       if (!closed) scheduleReconnect();
     } catch {
       if (closed) return;

@@ -11,3 +11,5 @@ dist/
 .vite/
 .swc/
 .DS_Store
+backend/data/
+.ollama/

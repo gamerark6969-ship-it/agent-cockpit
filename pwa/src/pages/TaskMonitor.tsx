@@ -4,6 +4,7 @@ import {
   getDiff,
   getEvents,
   getScreenshots,
+  getSettings,
   getTask,
   steerTask,
   stopTask,
@@ -22,10 +23,18 @@ import { GitPrIcon, SendIcon, StopIcon } from "../components/Icons";
 import { elapsed, formatNumber } from "../lib/utils";
 import { inputBase } from "../lib/ui";
 import AuthedImage from "../components/AuthedImage";
+import PatchView from "../components/PatchView";
 
 const TERMINAL: TaskStatus[] = ["done", "failed", "stopped"];
 
 type Tab = "feed" | "diff" | "screenshots";
+
+const taskNav: { label: string; tab?: Tab; to?: string }[] = [
+  { label: "Chat", to: "/" },
+  { label: "Activity", tab: "feed" },
+  { label: "Preview", tab: "screenshots" },
+  { label: "Files", tab: "diff" },
+];
 
 export default function TaskMonitor() {
   const { id = "" } = useParams();
@@ -39,6 +48,7 @@ export default function TaskMonitor() {
   const [busy, setBusy] = useState(false);
   const [diff, setDiff] = useState<DiffResult | null>(null);
   const [shots, setShots] = useState<Screenshot[]>([]);
+  const [maxIterations, setMaxIterations] = useState<number | null>(null);
   const [, setTick] = useState(0);
 
   const seen = useRef<Set<number>>(new Set());
@@ -87,9 +97,13 @@ export default function TaskMonitor() {
     seen.current = new Set();
     void (async () => {
       try {
-        const t = await getTask(id);
+        const [t, settings] = await Promise.all([
+          getTask(id),
+          getSettings().catch(() => null),
+        ]);
         if (!alive) return;
         setTask(t);
+        setMaxIterations(settings?.max_iterations ?? null);
         const history = await getEvents(id, 0);
         if (!alive) return;
         ingest(history);
@@ -234,7 +248,10 @@ export default function TaskMonitor() {
         <p className="mt-2 text-sm text-fg">{task.prompt}</p>
         <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1 font-mono text-[11px] text-faint">
           <span>elapsed {elapsed(task.created_at)}</span>
-          <span>{task.iterations} iterations</span>
+          <span>
+            {task.iterations}
+            {maxIterations ? ` / ${maxIterations}` : ""} iterations
+          </span>
           <span>{formatNumber(task.tokens_used)} tokens</span>
           {task.model ? <span>{task.model}</span> : null}
         </div>
@@ -246,18 +263,28 @@ export default function TaskMonitor() {
         </p>
       ) : null}
 
-      <div className="mb-3 flex rounded-xl border border-line bg-surface p-1">
-        {(["feed", "diff", "screenshots"] as Tab[]).map((t) => (
-          <button
-            key={t}
-            onClick={() => setTab(t)}
-            className={`flex-1 rounded-lg py-2 text-xs font-medium capitalize transition-colors ${
-              tab === t ? "bg-elevated text-fg" : "text-faint"
-            }`}
-          >
-            {t}
-          </button>
-        ))}
+      <div className="mb-3 grid grid-cols-4 rounded-xl border border-line bg-surface p-1" aria-label="Task navigation">
+        {taskNav.map((item) => {
+          const className = `rounded-lg px-1 py-2 text-center text-xs font-medium transition-colors ${
+            item.tab === tab ? "bg-elevated text-fg" : "text-faint hover:text-muted"
+          }`;
+
+          return item.to ? (
+            <Link key={item.label} to={item.to} className={className}>
+              {item.label}
+            </Link>
+          ) : (
+            <button
+              key={item.label}
+              type="button"
+              onClick={() => item.tab && setTab(item.tab)}
+              className={className}
+              aria-pressed={item.tab === tab}
+            >
+              {item.label}
+            </button>
+          );
+        })}
       </div>
 
       {tab === "feed" ? (
@@ -286,7 +313,7 @@ export default function TaskMonitor() {
 
       {tab === "diff" ? (
         <div className="flex-1 pb-4">
-          {!diff || diff.files.length === 0 ? (
+          {!diff || (diff.files.length === 0 && !diff.patch) ? (
             <EmptyState title="No changes yet" description="File changes will show up as the agent works." />
           ) : (
             <div className="flex flex-col gap-2">
@@ -310,6 +337,7 @@ export default function TaskMonitor() {
                   </div>
                 </div>
               ))}
+              <PatchView patch={diff.patch} />
             </div>
           )}
         </div>

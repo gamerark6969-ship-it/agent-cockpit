@@ -148,6 +148,15 @@ export function ChatIcon({ className = base }: IconProps) {
   );
 }
 
+export function VideoIcon({ className = base }: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={className}>
+      <rect x="3" y="6" width="13" height="12" rx="2" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="m16 10 5-3v10l-5-3" />
+    </svg>
+  );
+}
+
 export function PlugIcon({ className = base }: IconProps) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={className}>

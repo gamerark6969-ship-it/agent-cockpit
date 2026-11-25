@@ -1,4 +1,4 @@
-import { getVapidPublicKey, subscribePush } from "./api";
+import { getVapidPublicKey, subscribePush, unsubscribePush } from "./api";
 
 function urlBase64ToUint8Array(base64String: string): Uint8Array {
   const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
@@ -73,4 +73,15 @@ export async function enablePush(): Promise<EnablePushResult> {
     keys: { p256dh, auth },
   });
   return { ok: true, message: "Notifications enabled on this device." };
+}
+
+export async function disablePush(): Promise<EnablePushResult> {
+  if (!pushSupported()) return { ok: false, message: "Push is not supported here." };
+  const registration = await navigator.serviceWorker.ready;
+  const subscription = await registration.pushManager.getSubscription();
+  if (subscription) {
+    await unsubscribePush(subscription.endpoint);
+    await subscription.unsubscribe();
+  }
+  return { ok: true, message: "Notifications disabled on this device." };
 }

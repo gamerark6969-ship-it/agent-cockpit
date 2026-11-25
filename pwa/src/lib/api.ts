@@ -144,6 +144,7 @@ export interface DiffFile {
 }
 
 export interface DiffResult {
+  patch?: string;
   summary: string;
   files: DiffFile[];
 }
@@ -157,6 +158,75 @@ export interface Screenshot {
 export interface PushSubscriptionInput {
   endpoint: string;
   keys: { p256dh: string; auth: string };
+}
+
+export interface AutomationSeries {
+  id: string;
+  name: string;
+  brief: string;
+  model: string | null;
+  timezone: string;
+  publish_times: string[];
+  enabled: boolean;
+  publish_mode: "review" | "auto";
+  privacy: "private" | "unlisted" | "public";
+  language: string;
+  voice: string;
+  made_for_kids: boolean;
+  contains_synthetic_media: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export type AutomationSeriesInput = Omit<
+  AutomationSeries,
+  "id" | "created_at" | "updated_at"
+>;
+
+export interface AutomationEvent {
+  type: string;
+  message: string;
+  created_at: string;
+}
+
+export interface AutomationRun {
+  id: string;
+  series_id: string;
+  status: string;
+  stage: string;
+  title: string | null;
+  description: string | null;
+  error: string | null;
+  created_at: string;
+  updated_at: string;
+  youtube_video_id: string | null;
+  youtube_url: string | null;
+  media_url: string | null;
+  events?: AutomationEvent[] | null;
+  manifest?: Record<string, unknown> | null;
+}
+
+export interface AutomationStatus {
+  youtube: {
+    configured: boolean;
+    connected: boolean;
+    channel_id?: string | null;
+    channel_title?: string | null;
+  };
+  renderer: { available: boolean; detail?: string | null };
+  models: string[];
+  storage: {
+    available: boolean;
+    backend?: string;
+    persistent: boolean;
+  };
+  worker: {
+    enabled: boolean;
+    running: boolean;
+    active_run_id?: string | null;
+    last_poll_at?: string | null;
+    last_error?: string | null;
+  };
 }
 
 // ── endpoints ───────────────────────────────────────────
@@ -272,6 +342,77 @@ export function putSettings(body: AppSettings) {
 
 export function listModels() {
   return apiFetch<{ models: string[] }>("/api/models");
+}
+
+export function unsubscribePush(endpoint: string) {
+  return apiFetch<void>("/api/push/subscribe", { method: "DELETE", body: JSON.stringify({ endpoint }) });
+}
+
+// ── YouTube video automation ─────────────────────────────
+
+export function getAutomationStatus() {
+  return apiFetch<AutomationStatus>("/api/automation/status");
+}
+
+export function listAutomationSeries() {
+  return apiFetch<AutomationSeries[]>("/api/automation/series");
+}
+
+export function createAutomationSeries(body: AutomationSeriesInput) {
+  return apiFetch<AutomationSeries>("/api/automation/series", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export function updateAutomationSeries(id: string, body: Partial<AutomationSeriesInput>) {
+  return apiFetch<AutomationSeries>(`/api/automation/series/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  });
+}
+
+export function startAutomationRun(seriesId: string) {
+  return apiFetch<AutomationRun>(
+    `/api/automation/series/${encodeURIComponent(seriesId)}/run`,
+    { method: "POST" },
+  );
+}
+
+export function listAutomationRuns(limit = 50) {
+  return apiFetch<AutomationRun[]>(`/api/automation/runs?limit=${limit}`);
+}
+
+export function getAutomationRun(runId: string) {
+  return apiFetch<AutomationRun>(`/api/automation/runs/${encodeURIComponent(runId)}`);
+}
+
+export function approveAutomationRun(runId: string) {
+  return apiFetch<AutomationRun>(`/api/automation/runs/${encodeURIComponent(runId)}/approve`, {
+    method: "POST",
+  });
+}
+
+export function cancelAutomationRun(runId: string) {
+  return apiFetch<AutomationRun>(`/api/automation/runs/${encodeURIComponent(runId)}/cancel`, {
+    method: "POST",
+  });
+}
+
+export function retryAutomationRun(runId: string) {
+  return apiFetch<AutomationRun>(`/api/automation/runs/${encodeURIComponent(runId)}/retry`, {
+    method: "POST",
+  });
+}
+
+export function getYouTubeAuthorizationUrl() {
+  return apiFetch<{ authorization_url: string }>("/api/automation/youtube/connect");
+}
+
+export function disconnectYouTube() {
+  return apiFetch<{ connected: boolean }>("/api/automation/youtube/disconnect", {
+    method: "POST",
+  });
 }
 
 // ── connectors ──────────────────────────────────────────

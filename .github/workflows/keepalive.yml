@@ -10,4 +10,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Ping backend health endpoint
-        run: curl -fsS --retry 3 --retry-delay 10 --max-time 90 https://agent-cockpit-backend.onrender.com/api/health
+        env:
+          BACKEND_URL: ${{ secrets.BACKEND_URL }}
+        run: curl -fsS --retry 3 --retry-delay 10 --max-time 90 "${BACKEND_URL%/}/api/health"

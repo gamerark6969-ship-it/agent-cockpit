@@ -35,6 +35,7 @@ export default defineConfig({
         ],
       },
       workbox: {
+        importScripts: ["push-handler.js"],
         navigateFallback: `${withSlash}index.html`,
         globPatterns: ["**/*.{js,css,html,png,svg}"],
       },
