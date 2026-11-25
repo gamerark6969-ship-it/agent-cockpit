@@ -6,6 +6,8 @@ from pydantic import Field, field_validator
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+PUBLIC_PWA_ORIGIN = "https://agent-cockpit-pwa.onrender.com"
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
@@ -124,8 +126,10 @@ class Settings(BaseSettings):
     @property
     def cors_origins(self) -> list:
         origins = [origin.strip().rstrip("/") for origin in self.CORS_ORIGINS.split(",") if origin.strip()]
-        if self.AUTOMATION_FRONTEND_URL:
-            frontend = urlsplit(self.AUTOMATION_FRONTEND_URL.strip())
+        for frontend_url in (self.AUTOMATION_FRONTEND_URL, PUBLIC_PWA_ORIGIN):
+            if not frontend_url:
+                continue
+            frontend = urlsplit(frontend_url.strip())
             if frontend.scheme in ("http", "https") and frontend.netloc:
                 frontend_origin = f"{frontend.scheme}://{frontend.netloc}"
                 if frontend_origin not in origins:

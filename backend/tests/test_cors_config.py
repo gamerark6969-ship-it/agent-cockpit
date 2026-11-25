@@ -13,6 +13,12 @@ def test_frontend_origin_is_allowed_even_when_cors_setting_is_stale():
     ]
 
 
+def test_deployed_pwa_origin_is_always_allowed():
+    settings = Settings(CORS_ORIGINS="https://example.com")
+
+    assert "https://agent-cockpit-pwa.onrender.com" in settings.cors_origins
+
+
 def test_duplicate_frontend_origin_is_not_added_twice():
     settings = Settings(
         CORS_ORIGINS="https://agent-cockpit-pwa.onrender.com/",
