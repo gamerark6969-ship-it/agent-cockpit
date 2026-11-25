@@ -60,6 +60,7 @@ class Settings(BaseSettings):
     CONNECTOR_SECRET: Optional[str] = None
 
     CORS_ORIGINS: str = "http://localhost:5173,http://127.0.0.1:5173"
+    AUTOMATION_FRONTEND_URL: Optional[str] = None
 
     VAPID_PUBLIC_KEY: Optional[str] = None
     VAPID_PRIVATE_KEY: Optional[str] = None
@@ -122,7 +123,14 @@ class Settings(BaseSettings):
 
     @property
     def cors_origins(self) -> list:
-        return [origin.strip() for origin in self.CORS_ORIGINS.split(",") if origin.strip()]
+        origins = [origin.strip().rstrip("/") for origin in self.CORS_ORIGINS.split(",") if origin.strip()]
+        if self.AUTOMATION_FRONTEND_URL:
+            frontend = urlsplit(self.AUTOMATION_FRONTEND_URL.strip())
+            if frontend.scheme in ("http", "https") and frontend.netloc:
+                frontend_origin = f"{frontend.scheme}://{frontend.netloc}"
+                if frontend_origin not in origins:
+                    origins.append(frontend_origin)
+        return origins
 
     def validate_production_secrets(self) -> None:
         if self.ENVIRONMENT.lower() not in ("production", "prod"):
