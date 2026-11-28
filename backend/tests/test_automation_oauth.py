@@ -135,6 +135,29 @@ class OAuthStateTests(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(_FakeGoogleClient.requests[-1][0], GOOGLE_TOKEN)
                     self.assertEqual(_FakeGoogleClient.requests[-1][1]["data"]["client_secret"], "rotated")
 
+    async def test_shared_worker_can_refresh_uploaded_client_without_its_own_callback(self):
+        from app.automation.models import YouTubeClient
+        from app.automation.youtube import _access_token, GOOGLE_TOKEN
+        from app.crypto import encrypt_json
+        with (
+            patch.object(automation_settings, "youtube_client_id", None),
+            patch.object(automation_settings, "youtube_client_secret", None),
+            patch.object(automation_settings, "youtube_client_file", None),
+            patch.object(automation_settings, "youtube_redirect_uri", None),
+            patch("app.automation.youtube.httpx.AsyncClient", _FakeGoogleClient),
+        ):
+            async with self.sessions() as session:
+                session.add(YouTubeClient(id=1, config_enc=encrypt_json({"client_id":"stored-id","client_secret":"stored-secret"})))
+                session.add(YouTubeCredential(id=1, tokens_enc=encrypt_json({"refresh_token":"refresh"})))
+                await session.commit()
+            async with self.sessions() as session:
+                _FakeGoogleClient.requests = []
+                await _access_token(session)
+                endpoint, request = _FakeGoogleClient.requests[0]
+                self.assertEqual(endpoint, GOOGLE_TOKEN)
+                self.assertEqual(request["data"]["client_id"], "stored-id")
+                self.assertEqual(request["data"]["client_secret"], "stored-secret")
+
     async def test_authorization_failure_does_not_reflect_provider_error_body(self):
         class FailingClient(_FakeGoogleClient):
             async def post(self, url, **kwargs):

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import {
+  apiFetch,
   createConnector,
   deleteConnector,
   listConnectors,
@@ -7,7 +8,7 @@ import {
   type Connector,
 } from "../lib/api";
 import Spinner from "../components/Spinner";
-import { CheckIcon, PlugIcon, TrashIcon } from "../components/Icons";
+import { TrashIcon } from "../components/Icons";
 import { btnGhost, btnPrimary, card, inputBase } from "../lib/ui";
 
 interface Field {
@@ -32,7 +33,7 @@ const CATALOG: CatalogItem[] = [
     ["xingchi", "Xingchi · GPT-6.1 Sol", "https://api.xingchiapi.com/v1"],
     ["xingchi2", "Xingchi 2 · GPT-6.1 Sol", "https://api.xingchiapi.com/v1"],
   ].map(([kind,title,url]) => ({
-    kind, title, blurb: "OpenAI Responses model route. Credentials are encrypted on the backend.",
+    kind, title, blurb: url,
     fields: [
       { key: "api_key", label: "API key", placeholder: "API key (leave blank to keep the saved key)", type: "password" },
       { key: "base_url", label: "API base URL", placeholder: url },
@@ -83,10 +84,14 @@ export default function Connectors() {
   const [editing, setEditing] = useState<string | null>(null);
   const [values, setValues] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
+  const [tab, setTab] = useState<"models" | "tools">("models");
+  const [checks, setChecks] = useState<Record<string, { ok: boolean; detail: string }>>({});
+  const [checking, setChecking] = useState("");
 
   const load = async () => {
     try {
       setError("");
+      setChecks({});
       setConnectors(await listConnectors());
     } catch (err) {
       setError(err instanceof Error ? err.message : "failed to load connectors");
@@ -100,6 +105,19 @@ export default function Connectors() {
   }, []);
 
   const byKind = (kind: string) => connectors.find((c) => c.kind === kind);
+  const isModel = (item: CatalogItem) => item.fields.some(field => field.key === "api_key");
+
+  const check = async (connector: Connector) => {
+    setChecking(connector.id);
+    try {
+      const result = await apiFetch<{ ok: boolean; detail: string }>(`/api/connectors/${connector.id}/check-model`, { method: "POST" });
+      setChecks(last => ({ ...last, [connector.id]: result }));
+    } catch (err) {
+      setChecks(last => ({ ...last, [connector.id]: { ok: false, detail: err instanceof Error ? err.message : "Catalog check failed." } }));
+    } finally {
+      setChecking("");
+    }
+  };
 
   const save = async (item: CatalogItem) => {
     setBusy(true);
@@ -152,13 +170,15 @@ export default function Connectors() {
   };
 
   return (
-    <div className="safe-top px-4 pb-nav pt-5">
-      <header className="mb-5">
-        <div className="flex items-center gap-2">
-          <PlugIcon className="h-5 w-5 text-muted" />
-          <h1 className="text-xl font-semibold tracking-tight text-fg">Connectors</h1>
+    <main className="safe-top mx-auto max-w-2xl px-4 pb-nav pt-6">
+      <header className="mb-5 space-y-3">
+        <h1 className="text-3xl font-bold tracking-tight text-fg">Connectors</h1>
+        <div className="flex gap-2" aria-label="Connector groups">
+          {(["models", "tools"] as const).map(group => <button key={group} aria-pressed={tab === group}
+            className={tab === group ? btnPrimary : btnGhost} onClick={() => { setTab(group); setEditing(null); setValues({}); }}>
+            {group === "models" ? "Model providers" : "Other tools"}
+          </button>)}
         </div>
-        <p className="mt-0.5 text-[13px] text-faint">Give the agent access to your tools</p>
       </header>
 
       {error ? (
@@ -173,46 +193,34 @@ export default function Connectors() {
         </div>
       ) : (
         <div className="flex flex-col gap-2.5">
-          {CATALOG.map((item, i) => {
+          {CATALOG.filter(item => isModel(item) === (tab === "models")).map((item, i) => {
             const c = byKind(item.kind);
             const isEditing = editing === item.kind;
             const hasFields = item.fields.length > 0;
             return (
               <div
                 key={item.kind}
-                className={`${card} animate-rise`}
+                className={`${card} animate-rise p-4`}
                 style={{ animationDelay: `${Math.min(i, 8) * 30}ms` }}
               >
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <div className="flex items-center gap-2">
-                      <p className="text-sm font-semibold text-fg">{item.title}</p>
-                      {c?.enabled ? (
-                        <span className="flex items-center gap-1 rounded-full border border-line bg-elevated px-2 py-0.5 text-[10px] font-medium text-muted">
-                          <CheckIcon className="h-3 w-3" /> connected
-                        </span>
-                      ) : null}
-                    </div>
-                    <p className="mt-0.5 text-xs text-faint">{item.blurb}</p>
-                    {c && Object.keys(c.config).length ? (
-                      <p className="mt-1 truncate font-mono text-[10px] text-faint">
-                        {Object.entries(c.config)
-                          .map(([k, v]) => `${k}: ${v}`)
-                          .join("  ·  ")}
-                      </p>
-                    ) : null}
+                    <h2 className="font-semibold text-fg">{item.title}</h2>
+                    <p className="mt-1 break-words text-xs text-muted">{isModel(item) ? c?.config.base_url || item.blurb : item.blurb}</p>
                   </div>
                   {c ? (
                     <button
                       onClick={() => void toggle(c)}
-                      disabled={busy}
-                      className={`shrink-0 rounded-full px-3 py-1 text-[11px] font-semibold ${
+                      disabled={busy || !!checking}
+                      aria-label={`${c.enabled ? "Disable" : "Enable"} ${item.title}`}
+                      aria-pressed={c.enabled}
+                      className={`min-h-11 shrink-0 rounded-xl px-3 text-xs font-semibold ${
                         c.enabled
                           ? "bg-accent text-canvas"
                           : "border border-line text-faint"
                       }`}
                     >
-                      {c.enabled ? "on" : "off"}
+                      {c.enabled ? "Enabled" : "Disabled"}
                     </button>
                   ) : null}
                 </div>
@@ -220,15 +228,15 @@ export default function Connectors() {
                 {isEditing && hasFields ? (
                   <div className="mt-3 flex flex-col gap-2">
                     {item.fields.map((f) => (
+                      <label key={f.key} className="block text-xs font-semibold text-muted">{f.label}
                       <input
-                        key={f.key}
-                        className={inputBase}
+                        className={`${inputBase} mt-1`}
                         type={f.type || "text"}
                         aria-label={f.label}
                         placeholder={f.placeholder || f.label}
                         value={values[f.key] || ""}
                         onChange={(e) => setValues((v) => ({ ...v, [f.key]: e.target.value }))}
-                      />
+                      /></label>
                     ))}
                     <div className="flex gap-2">
                       <button className={btnPrimary} disabled={busy} onClick={() => void save(item)}>
@@ -241,13 +249,13 @@ export default function Connectors() {
                     </div>
                   </div>
                 ) : (
-                  <div className="mt-3 flex gap-2">
+                  <div className="mt-3 flex flex-wrap gap-2">
                     {hasFields ? (
                       <button
                         className={btnGhost}
                         onClick={() => {
                           setEditing(item.kind);
-                          setValues({});
+                          setValues(isModel(item) && c ? { base_url: c.config.base_url || "" } : {});
                         }}
                       >
                         {c ? "Update" : "Connect"}
@@ -255,6 +263,9 @@ export default function Connectors() {
                     ) : (
                       <span className="text-[11px] text-faint">Not available yet</span>
                     )}
+                    {isModel(item) && c?.enabled && <button className={btnGhost} disabled={!!checking || busy} onClick={() => void check(c)}>
+                      {checking === c.id ? "Checking…" : "Check model access"}
+                    </button>}
                     {c ? (
                       <button
                         className="flex h-11 w-11 items-center justify-center rounded-xl border border-line text-faint active:text-del"
@@ -267,15 +278,13 @@ export default function Connectors() {
                     ) : null}
                   </div>
                 )}
+                {c && checks[c.id] && <p role="status" className={`mt-3 text-sm ${checks[c.id].ok ? "text-muted" : "text-del"}`}>{checks[c.id].detail}</p>}
               </div>
             );
           })}
         </div>
       )}
 
-      <p className="mt-4 text-center text-[11px] text-faint">
-        Secrets are encrypted at rest and never shown again after saving.
-      </p>
-    </div>
+    </main>
   );
 }

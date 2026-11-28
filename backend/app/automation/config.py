@@ -1,10 +1,14 @@
 """Settings isolated from the main application settings namespace."""
 
 import json
+import os
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from ..config import PUBLIC_PWA_ORIGIN, settings
 
 
 class AutomationSettings(BaseSettings):
@@ -41,9 +45,39 @@ class AutomationSettings(BaseSettings):
     missed_slot_grace_minutes: int = Field(default=120, ge=0, le=1440)
     schedule_horizon_hours: int = Field(default=30, ge=1, le=72)
 
-    def youtube_credentials(self) -> tuple[str, str] | None:
-        if not self.youtube_redirect_uri:
+    @staticmethod
+    def _safe_url(value: str | None) -> str | None:
+        if not value:
             return None
+        try:
+            parsed = urlsplit(value)
+            if (parsed.username or parsed.password or parsed.query or parsed.fragment or not parsed.hostname
+                    or any(ch.isspace() or ord(ch) < 32 or ch == chr(92) for ch in value)):
+                return None
+            if parsed.scheme == "https" or (parsed.scheme == "http" and parsed.hostname in {"localhost","127.0.0.1","::1"}):
+                return value.rstrip("/")
+        except ValueError:
+            pass
+        return None
+
+    @property
+    def callback_url(self) -> str | None:
+        if self.youtube_redirect_uri:
+            return self._safe_url(self.youtube_redirect_uri)
+        origin = self._safe_url(self.public_base_url or settings.PUBLIC_BASE_URL or os.getenv("RENDER_EXTERNAL_URL"))
+        if origin and urlsplit(origin).path in {"", "/"}:
+            return origin + "/api/automation/youtube/callback"
+        return None
+
+    @property
+    def studio_url(self) -> str | None:
+        origins = settings.cors_origins
+        hosted = self.callback_url == "https://agent-cockpit-backend.onrender.com/api/automation/youtube/callback"
+        origin = self.frontend_url or (PUBLIC_PWA_ORIGIN if hosted else origins[0] if len(origins) == 1 else None)
+        safe = self._safe_url(origin)
+        return safe + "/studio" if safe else None
+
+    def youtube_credentials(self) -> tuple[str, str] | None:
         if self.youtube_client_id or self.youtube_client_secret:
             if self.youtube_client_id and self.youtube_client_secret:
                 return self.youtube_client_id, self.youtube_client_secret
@@ -65,7 +99,7 @@ class AutomationSettings(BaseSettings):
 
     @property
     def youtube_configured(self) -> bool:
-        return self.youtube_credentials() is not None
+        return self.callback_url is not None and self.youtube_credentials() is not None
 
     @property
     def s3_configured(self) -> bool:

@@ -79,14 +79,14 @@ async def upsert(
     config: Optional[Dict[str, Any]] = None,
     enabled: bool = True,
 ) -> Connector:
-    from .agent.provider_store import PROVIDER_DEFAULTS, validate_provider_config
-    if kind in PROVIDER_DEFAULTS and config is not None:
-        config = validate_provider_config(kind,config)
+    from .agent.provider_store import PROVIDER_DEFAULTS, merge_provider_config
     async with SessionLocal() as session:
         connector = (
             await session.execute(select(Connector).where(Connector.kind == kind))
         ).scalar_one_or_none()
         if connector is None:
+            if kind in PROVIDER_DEFAULTS:
+                config = merge_provider_config(kind, {}, config or {}, enabled)
             connector = Connector(
                 id=new_id(),
                 kind=kind,
@@ -98,7 +98,10 @@ async def upsert(
         else:
             if name is not None:
                 connector.name = name
-            if config is not None:
+            if kind in PROVIDER_DEFAULTS:
+                saved = decrypt_json(connector.config_enc)
+                connector.config_enc = encrypt_json(merge_provider_config(kind, saved, config or {}, enabled))
+            elif config is not None:
                 merged = decrypt_json(connector.config_enc)
                 merged.update(config)
                 connector.config_enc = encrypt_json(merged)
@@ -125,12 +128,14 @@ async def update(
             return None
         if name is not None:
             connector.name = name
-        if config is not None:
+        from .agent.provider_store import PROVIDER_DEFAULTS, merge_provider_config
+        if connector.kind in PROVIDER_DEFAULTS:
+            saved = decrypt_json(connector.config_enc)
+            active = connector.enabled if enabled is None else enabled
+            connector.config_enc = encrypt_json(merge_provider_config(connector.kind, saved, config or {}, active))
+        elif config is not None:
             merged = decrypt_json(connector.config_enc)
             merged.update(config)
-            from .agent.provider_store import PROVIDER_DEFAULTS, validate_provider_config
-            if connector.kind in PROVIDER_DEFAULTS:
-                merged = validate_provider_config(connector.kind,merged)
             connector.config_enc = encrypt_json(merged)
         if enabled is not None:
             connector.enabled = enabled

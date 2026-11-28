@@ -44,8 +44,17 @@ export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise
   if (!res.ok) {
     let detail = res.statusText || `HTTP ${res.status}`;
     try {
-      const body = (await res.json()) as { detail?: string };
-      if (body && body.detail) detail = body.detail;
+      const body = await res.json();
+      if (typeof body?.detail === "string" && body.detail) {
+        detail = body.detail;
+      } else if (Array.isArray(body?.detail)) {
+        const messages = body.detail.flatMap((issue: { loc?: unknown[]; msg?: string } | null) => {
+          if (typeof issue?.msg !== "string") return [];
+          const field = Array.isArray(issue.loc) ? issue.loc.filter(part => part !== "body").join(".") : "";
+          return [field ? `${field}: ${issue.msg}` : issue.msg];
+        });
+        if (messages.length) detail = messages.join(". ");
+      }
     } catch {
       /* not json */
     }
@@ -209,6 +218,8 @@ export interface AutomationRun {
 
 export interface AutomationStatus {
   youtube: {
+    redirect_uri?: string | null;
+    client_source?: "server" | "studio" | null;
     configured: boolean;
     connected: boolean;
     channel_id?: string | null;

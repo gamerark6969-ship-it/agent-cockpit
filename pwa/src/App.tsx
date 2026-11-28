@@ -29,8 +29,9 @@ function Shell() {
         <Routes>
           <Route path="/reminders" element={<RequireAuth><Reminders /></RequireAuth>} />
           <Route path="/login" element={<Login />} />
+          <Route path="/" element={<Navigate to={{ pathname: "/studio", search: location.search, hash: location.hash }} replace />} />
           <Route
-            path="/"
+            path="/chats"
             element={
               <RequireAuth>
                 <Chats />

@@ -55,6 +55,7 @@ class AutomationDatabaseTests(unittest.IsolatedAsyncioTestCase):
         async with self.sessions() as session:
             series = await session.get(VideoSeries, "series-1")
             series.publish_times = ["10:00"]
+            series.created_at = datetime(2026, 2, 1, tzinfo=timezone.utc)
             await session.commit()
         now = datetime(2026, 2, 5, 10, 45, tzinfo=timezone.utc)
         with (
@@ -69,6 +70,14 @@ class AutomationDatabaseTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(second, 0)
         self.assertEqual(len(runs), 2)
         self.assertTrue(all(run.scheduled_for.tzinfo is None or run.scheduled_for.tzinfo for run in runs))
+
+    async def test_claim_retries_generation_after_the_missed_slot_window(self):
+        async with self.sessions() as session:
+            session.add(VideoRun(id="generation-retry", series_id="series-1", status="queued",
+                                 stage="generate", attempt=1, retry_count=1,
+                                 scheduled_for=utcnow() - timedelta(days=2)))
+            await session.commit()
+        self.assertEqual(await self.service.claim_one(), "generation-retry")
 
     async def test_atomic_claim_and_expired_lease_reclaim_increment_fence(self):
         async with self.sessions() as session:

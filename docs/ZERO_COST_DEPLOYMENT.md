@@ -2,7 +2,7 @@
 
 Implemented path: **Render Free API + free static PWA + Neon Free Postgres + Supabase Free private storage + public GitHub Actions runner**. Video production and coding workspaces run on the scheduled runner, so the API can sleep. No GPU, E2B subscription, or paid video-generation API is required for this path.
 
-The code is implemented and locally verified. Deployment still needs your accounts, repository, secrets, and Google channel consent. This session has not created cloud accounts, pushed your repository, or uploaded to YouTube.
+Each installation uses its owner's cloud accounts, model credentials and Google channel consent.
 
 ## 1. Create the persistent services
 
@@ -48,9 +48,9 @@ Dispatch failures leave the task queued for cron. An immediate dispatch still wa
 ## 3. Google / YouTube connection
 
 1. Create a Google Cloud project, enable **YouTube Data API v3**, and configure its OAuth consent screen.
-2. Create a **Web application** OAuth client. Add the exact redirect URI `https://<api-host>/api/automation/youtube/callback`.
-3. Set `AUTOMATION_YOUTUBE_CLIENT_ID`, `AUTOMATION_YOUTUBE_CLIENT_SECRET`, and `AUTOMATION_YOUTUBE_REDIRECT_URI` on Render.
-4. Open the PWA, log in using `APP_TOKEN`, choose **Studio → Connect with Google**, and authorize your channel. The backend saves refresh credentials encrypted in Neon.
+2. Sign in to the PWA and open **Studio → Setup → YouTube**. Copy the displayed redirect URI into a Google **Web application** OAuth client. If Google shows the app in testing, add your channel's Google account as a test user.
+3. Download that client's JSON from Google and choose **Upload Google client JSON** in Studio. The backend encrypts the credentials. Installations managed through Render environment variables can use `AUTOMATION_YOUTUBE_CLIENT_ID`, `AUTOMATION_YOUTUBE_CLIENT_SECRET`, and `AUTOMATION_YOUTUBE_REDIRECT_URI` instead.
+4. Choose **Connect with Google**, select the account that manages the channel, and approve access. Studio displays the connected channel after Google redirects back.
 5. Start with a series set to **Review** and **Private** visibility. Confirm a real upload, then select **Public** and **Automatic** for unattended publishing.
 
 Production consent configuration, the API project's available quota, channel publishing eligibility, and any applicable verification requirements must be checked in Google. Testing-mode consent may require reconnection as refresh grants expire. The app reports failures instead of assuming permanent authorization.

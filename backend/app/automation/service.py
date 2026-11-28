@@ -16,7 +16,7 @@ from ..db import SessionLocal
 from ..models import utcnow
 from .config import automation_settings as cfg
 from .models import VideoRun, VideoRunEvent, VideoSeries
-from .schedule import scheduled_slots
+from .schedule import lock_series_schedule, scheduled_slots
 from .schemas import VideoManifest
 from .storage import media_url, run_directory, archive_media, restore_media
 from . import charts, youtube
@@ -99,22 +99,26 @@ class AutomationService:
         end = now + timedelta(hours=cfg.schedule_horizon_hours)
         created = 0
         async with self.session_factory() as session:
-            series_rows = (await session.execute(select(VideoSeries).where(VideoSeries.enabled.is_(True)))).scalars().all()
-            series_rows = [
-                SimpleNamespace(id=row.id, timezone=row.timezone, publish_times=list(row.publish_times or []))
-                for row in series_rows
-            ]
-            for series in series_rows:
-                for slot in scheduled_slots(series, start, end):
-                    # Unique DB constraint is the cross-process reservation. Each
-                    # insert commits separately so a competing insert cannot undo
-                    # neighboring slots in this pass.
-                    session.add(VideoRun(series_id=series.id, scheduled_for=slot, status="queued", stage="generate"))
-                    try:
-                        await session.commit()
-                        created += 1
-                    except IntegrityError:
-                        await session.rollback()
+            series_ids = list(await session.scalars(select(VideoSeries.id).where(VideoSeries.enabled.is_(True))))
+            await session.commit()
+            for series_id in series_ids:
+                # Serialize a series edit with its reservation batch. Each
+                # insert has its own savepoint for the existing unique slot.
+                async with session.begin():
+                    series = await lock_series_schedule(session, series_id)
+                    if series is None or not series.enabled:
+                        continue
+                    effective = series.schedule_effective_at or series.created_at
+                    if effective.tzinfo is None:  # SQLite stores UTC without an offset.
+                        effective = effective.replace(tzinfo=timezone.utc)
+                    for slot in scheduled_slots(series, max(start, effective), end):
+                        try:
+                            async with session.begin_nested():
+                                session.add(VideoRun(series_id=series.id, scheduled_for=slot, status="queued", stage="generate"))
+                                await session.flush()
+                            created += 1
+                        except IntegrityError:
+                            pass
         return created
 
     async def claim_one(self) -> str | None:
@@ -122,7 +126,7 @@ class AutomationService:
         expired = or_(VideoRun.lease_expires_at.is_(None), VideoRun.lease_expires_at < now)
         async with self.session_factory() as session:
             await session.execute(update(VideoRun).where(
-                VideoRun.status == "queued", VideoRun.stage == "generate", VideoRun.scheduled_for.is_not(None),
+                VideoRun.status == "queued", VideoRun.stage == "generate", VideoRun.attempt == 0, VideoRun.scheduled_for.is_not(None),
                 VideoRun.scheduled_for < now - timedelta(minutes=cfg.missed_slot_grace_minutes),
             ).values(status="cancelled", error="Missed production slot", updated_at=now))
             await session.commit()

@@ -350,7 +350,7 @@ export default function Chat() {
     <div className="safe-top flex h-dvh flex-col">
       <header className="flex items-center gap-1.5 border-b border-line px-2.5 py-2">
         <Link
-          to="/"
+          to="/chats"
           className="flex h-9 w-9 items-center justify-center rounded-lg text-muted transition-colors active:bg-hover active:text-fg"
           aria-label="Back"
         >

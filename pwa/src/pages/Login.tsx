@@ -40,14 +40,9 @@ export default function Login() {
 
   return (
     <div className="safe-top safe-bottom flex min-h-dvh flex-col justify-center px-6">
-      <div className="mb-8">
-        <div className="mb-5 flex h-14 w-14 items-center justify-center rounded-2xl border border-line bg-surface text-xl font-semibold text-fg">
-          AC
-        </div>
-        <h1 className="text-2xl font-semibold tracking-tight text-fg">Agent Cockpit</h1>
-        <p className="mt-1.5 text-sm text-faint">
-          Control an autonomous software engineer from your phone.
-        </p>
+      <div className="login-brand"><span className="brand-mark" aria-hidden="true" /><span>Agent Cockpit</span></div>
+      <div className="mb-7"><h1 className="text-4xl font-bold tracking-tight">Sign in</h1>
+        <p className="mt-2 text-sm text-muted">Enter your workspace access token to open Studio.</p>
       </div>
 
       {existing ? (

@@ -21,7 +21,7 @@ export default function Projects() {
     try {
       setError("");
       const rows = await listProjects();
-      setProjects(rows);
+      setProjects(rows.filter(project => project.kind === "repo"));
     } catch (err) {
       setError(err instanceof Error ? err.message : "failed to load projects");
     } finally {

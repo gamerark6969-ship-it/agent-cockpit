@@ -59,7 +59,7 @@ MODEL_CATALOG = [PA_DEFAULT_MODEL, *GEMINI_MODEL_CATALOG]
 def list_pa_models() -> List[str]:
     """Model ids to surface in the app, filtered by configured providers."""
     out: List[str] = []
-    from .provider_store import runtime_routes
+    from .provider_store import disabled_routes, runtime_routes
     if settings.FREEGG_API_KEY:
         out.append("freegg/gpt-6.1-sol")
     out.extend(name for name in sorted(runtime_routes,key=lambda name: (not name.startswith("freegg/"),name)) if name not in out)
@@ -73,7 +73,7 @@ def list_pa_models() -> List[str]:
         out.extend([m for m in BAI_MODELS if m not in out])
     if settings.AGENTROUTER_API_KEY:
         out.extend([m for m in GEMINI_MODEL_CATALOG if m not in out])
-    return list(dict.fromkeys(out))
+    return [name for name in dict.fromkeys(out) if name not in disabled_routes]
 
 
 def _is_bai_model(name: str) -> bool:
@@ -88,11 +88,13 @@ def _is_gemini_model(name: str) -> bool:
 @lru_cache(maxsize=32)
 def build_single_model(name: str) -> Optional[Model]:
     """Construct one provider-backed model, or None if its key is missing."""
-    from .provider_store import runtime_routes
+    from .provider_store import disabled_routes, runtime_routes
+    if name in disabled_routes:
+        return None
     route = runtime_routes.get(name)
-    if name == "freegg/gpt-6.1-sol" and settings.FREEGG_API_KEY:
+    if not route and name == "freegg/gpt-6.1-sol" and settings.FREEGG_API_KEY:
         route = {"base_url":settings.FREEGG_BASE_URL, "api_key":settings.FREEGG_API_KEY, "api_style":"responses"}
-    elif name == "agentrouter-openai/gpt-6.1-sol" and settings.AGENTROUTER_OPENAI_API_KEY:
+    elif not route and name == "agentrouter-openai/gpt-6.1-sol" and settings.AGENTROUTER_OPENAI_API_KEY:
         route = {"base_url":settings.AGENTROUTER_OPENAI_BASE_URL, "api_key":settings.AGENTROUTER_OPENAI_API_KEY, "api_style":"responses"}
     if route:
         provider = OpenAIProvider(base_url=route["base_url"],api_key=route["api_key"])

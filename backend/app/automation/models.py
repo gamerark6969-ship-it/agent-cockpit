@@ -17,6 +17,7 @@ class VideoSeries(Base):
     model: Mapped[str | None] = mapped_column(String(160), nullable=True)
     timezone: Mapped[str] = mapped_column(String(64), nullable=False, default="UTC")
     publish_times: Mapped[list] = mapped_column(JSON, nullable=False, default=lambda: ["09:00"])
+    schedule_effective_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     publish_mode: Mapped[str] = mapped_column(String(16), nullable=False, default="review")
     privacy: Mapped[str] = mapped_column(String(16), nullable=False, default="public")
@@ -88,6 +89,13 @@ class VideoRunEvent(Base):
     type: Mapped[str] = mapped_column(String(32), nullable=False)
     message: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
+
+
+class YouTubeClient(Base):
+    __tablename__ = "automation_youtube_client"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    config_enc: Mapped[str] = mapped_column(Text, nullable=False)
 
 
 class YouTubeCredential(Base):

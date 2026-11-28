@@ -186,7 +186,9 @@ async def _release_sandbox_after_terminal(task_id: str, sbx, is_chat: bool = Fal
         return
     try:
         current = await _get_task(task_id)
-        if current and current.status in ("done", "failed", "stopped"):
+        if current is None:
+            await sbx.kill()
+        elif current.status in ("done", "failed", "stopped"):
             grace = settings.SANDBOX_TIMEOUT_S if is_chat else TERMINAL_SANDBOX_GRACE_S
             await sbx_mod.keep_alive(sbx, seconds=grace)
     except Exception:

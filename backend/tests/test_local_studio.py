@@ -19,7 +19,7 @@ class LocalStudioTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             Path(directory, 'index.html').write_text('<title>Studio</title>', encoding='utf-8')
             with TestClient(with_phone_ui(api, directory)) as client:
-                for path in ['/studio?run=id', '/reminders', '/projects/my-project']:
+                for path in ['/studio?run=id', '/chats', '/reminders', '/projects/my-project']:
                     self.assertIn('<title>Studio</title>', client.get(path).text)
                 self.assertEqual(client.get('/api/automation/youtube/callback').json(), {'callback': True})
                 for path in ['/api/missing', '/s/missing', '/assets/missing.js', '/.env']:

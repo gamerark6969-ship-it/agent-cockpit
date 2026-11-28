@@ -3,6 +3,10 @@
 from datetime import date, datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
 
+from sqlalchemy import text
+
+from .models import VideoSeries
+
 
 def local_slot_utc(day: date, hhmm: str, zone_name: str) -> datetime:
     """Resolve a local wall-clock slot to UTC.
@@ -42,3 +46,11 @@ def scheduled_slots(series, start_utc: datetime, end_utc: datetime) -> list[date
                 slots.add(slot)
         day += timedelta(days=1)
     return sorted(slots)
+
+
+async def lock_series_schedule(session, series_id):
+    # SQLite ignores SELECT FOR UPDATE. Acquire its writer lock before reading
+    # the current schedule, so an obsolete reservation cannot race a phone edit.
+    if session.get_bind().dialect.name == "sqlite":
+        await session.execute(text("BEGIN IMMEDIATE"))
+    return await session.get(VideoSeries, series_id, with_for_update=True, populate_existing=True)

@@ -1,10 +1,22 @@
+from sqlalchemy import event
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from .config import settings
 
-_ensure_sqlite_driver = settings.DATABASE_URL
+def create_app_engine(url: str):
+    db_engine = create_async_engine(url, echo=False, pool_pre_ping=True)
+    if db_engine.dialect.name == "sqlite":
+        @event.listens_for(db_engine.sync_engine, "connect")
+        def enable_foreign_keys(connection, _):
+            cursor = connection.cursor()
+            try:
+                cursor.execute("PRAGMA foreign_keys=ON")
+            finally:
+                cursor.close()
+    return db_engine
 
-engine = create_async_engine(_ensure_sqlite_driver, echo=False, pool_pre_ping=True)
+
+engine = create_app_engine(settings.DATABASE_URL)
 
 SessionLocal = async_sessionmaker(engine, expire_on_commit=False)
 
@@ -14,7 +26,7 @@ async def get_session():
         yield session
 
 
-# ── settings store (single JSON row) ─────────────────────
+# â”€â”€ settings store (single JSON row) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 
 def _default_settings() -> dict:

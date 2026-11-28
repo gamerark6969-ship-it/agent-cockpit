@@ -1,6 +1,7 @@
 """YouTube OAuth and resumable upload operations."""
 
 import hashlib
+import json
 import secrets
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -13,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..crypto import decrypt_json, encrypt_json
 from .config import automation_settings as cfg
-from .models import OAuthState, VideoRun, YouTubeCredential
+from .models import OAuthState, VideoRun, YouTubeClient, YouTubeCredential
 
 GOOGLE_AUTH = "https://accounts.google.com/o/oauth2/v2/auth"
 GOOGLE_TOKEN = "https://oauth2.googleapis.com/token"
@@ -32,9 +33,50 @@ def _safe_error(response: httpx.Response) -> str:
     return f"YouTube request failed (HTTP {response.status_code})"
 
 
+async def client_settings(session: AsyncSession):
+    server_pair = cfg.youtube_credentials()
+    if server_pair:
+        return server_pair, "server"
+    stored = await session.get(YouTubeClient, 1)
+    data = decrypt_json(stored.config_enc) if stored else {}
+    if data.get("client_id") and data.get("client_secret"):
+        return (data["client_id"], data["client_secret"]), "studio"
+    return None, None
+
+
+async def save_web_client(session: AsyncSession, raw: bytes) -> None:
+    callback = cfg.callback_url
+    if not callback:
+        raise HTTPException(503, "Configure the backend public HTTPS origin before adding a client.")
+    if cfg.youtube_credentials():
+        raise HTTPException(409, "This server already supplies the Google client.")
+    try:
+        web = json.loads(raw)["web"]
+        pair = {k: web[k] for k in ("client_id", "client_secret")}
+        if not all(isinstance(v, str) and v.strip() and len(v) <= 1024 for v in pair.values()):
+            raise ValueError()
+        redirects = web.get("redirect_uris")
+    except (ValueError, KeyError, TypeError, AttributeError, RecursionError):
+        raise HTTPException(422, "Choose the downloaded JSON for a Google Web application client.")
+    if not isinstance(redirects, list) or callback not in redirects:
+        raise HTTPException(422, "Add the displayed callback to the authorized redirect URIs in Google, then download the JSON again.")
+    prior = await session.get(YouTubeClient, 1)
+    if prior:
+        old = decrypt_json(prior.config_enc)
+        if old.get("client_id") != pair["client_id"]:
+            await session.execute(delete(YouTubeCredential))
+            await session.execute(delete(OAuthState))
+        prior.config_enc = encrypt_json(pair)
+    else:
+        session.add(YouTubeClient(id=1, config_enc=encrypt_json(pair)))
+        await session.execute(delete(YouTubeCredential))
+        await session.execute(delete(OAuthState))
+    await session.commit()
+
+
 async def authorization_url(session: AsyncSession) -> str:
-    credentials = cfg.youtube_credentials()
-    if credentials is None:
+    credentials, _ = await client_settings(session)
+    if credentials is None or not cfg.callback_url:
         raise HTTPException(status_code=503, detail="YouTube OAuth is not configured")
     state = secrets.token_urlsafe(32)
     digest = hashlib.sha256(state.encode()).hexdigest()
@@ -44,7 +86,7 @@ async def authorization_url(session: AsyncSession) -> str:
     await session.commit()
     params = {
         "client_id": credentials[0],
-        "redirect_uri": cfg.youtube_redirect_uri,
+        "redirect_uri": cfg.callback_url,
         "response_type": "code",
         "scope": SCOPES,
         "access_type": "offline",
@@ -56,8 +98,8 @@ async def authorization_url(session: AsyncSession) -> str:
 
 
 async def oauth_callback(session: AsyncSession, *, code: str, state: str) -> None:
-    credentials = cfg.youtube_credentials()
-    if credentials is None:
+    credentials, _ = await client_settings(session)
+    if credentials is None or not cfg.callback_url:
         raise HTTPException(status_code=503, detail="YouTube OAuth is not configured")
     digest = hashlib.sha256(state.encode()).hexdigest()
     now = datetime.now(timezone.utc)
@@ -76,7 +118,7 @@ async def oauth_callback(session: AsyncSession, *, code: str, state: str) -> Non
                     "code": code,
                     "client_id": credentials[0],
                     "client_secret": credentials[1],
-                    "redirect_uri": cfg.youtube_redirect_uri,
+                    "redirect_uri": cfg.callback_url,
                     "grant_type": "authorization_code",
                 },
             )
@@ -128,7 +170,7 @@ async def _access_token(session: AsyncSession) -> str:
     tokens = decrypt_json(credential.tokens_enc)
     if tokens.get("access_token") and int(tokens.get("expires_at", 0)) > int(datetime.now(timezone.utc).timestamp()) + 60:
         return tokens["access_token"]
-    credentials = cfg.youtube_credentials()
+    credentials, _ = await client_settings(session)
     if not tokens.get("refresh_token") or credentials is None:
         raise RuntimeError("YouTube credentials need to be reconnected")
     async with httpx.AsyncClient(timeout=_TIMEOUT) as client:

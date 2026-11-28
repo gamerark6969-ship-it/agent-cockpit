@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import RedirectResponse
-from sqlalchemy import select
+from sqlalchemy import delete, select
 
 from ..crypto import decrypt_json
 from ..db import SessionLocal
@@ -20,6 +20,7 @@ from .dispatch import dispatch_worker
 from .config import automation_settings as cfg
 from .models import VideoRun, VideoRunEvent, VideoSeries, YouTubeCredential
 from .schemas import RunOut, SeriesInput, SeriesPatch
+from .schedule import lock_series_schedule, scheduled_slots
 from .service import AutomationService
 from .storage import media_file_response, media_url, verify_media_signature
 
@@ -112,6 +113,7 @@ async def _models() -> list[str]:
 @router.get("/status")
 async def status():
     async with SessionLocal() as session:
+        client, source = await youtube.client_settings(session)
         credential = await session.get(YouTubeCredential, 1)
         connected = bool(credential and decrypt_json(credential.tokens_enc).get("refresh_token"))
         channel = {
@@ -131,7 +133,7 @@ async def status():
     except OSError:
         storage = {"available": False, "backend": "filesystem", "persistent": cfg.storage_persistent}
     return {
-        "youtube": {"configured": cfg.youtube_configured, "connected": connected, **channel},
+        "youtube": {"configured": bool(client and cfg.callback_url), "redirect_uri": cfg.callback_url, "client_source": source, "connected": connected, **channel},
         "renderer": renderer,
         "models": await _models(),
         "storage": storage,
@@ -163,11 +165,31 @@ async def patch_series(series_id: str, payload: SeriesPatch):
     if not changes:
         raise HTTPException(status_code=400, detail="No fields supplied")
     async with SessionLocal() as session:
-        series = await session.get(VideoSeries, series_id)
+        series = await lock_series_schedule(session, series_id)
         if series is None:
             raise HTTPException(status_code=404, detail="Series not found")
+        schedule_changed = any(field in changes and changes[field] != getattr(series, field)
+                               for field in ("timezone", "publish_times", "enabled"))
         for field, value in changes.items():
             setattr(series, field, value)
+        if schedule_changed:
+            series.schedule_effective_at = datetime.now(timezone.utc)
+            pending = (
+                VideoRun.series_id == series_id, VideoRun.scheduled_for.is_not(None),
+                VideoRun.stage == "generate", VideoRun.status == "queued", VideoRun.attempt == 0,
+            )
+            if series.enabled:
+                # Keep unchanged slots, including a due slot waiting for its
+                # first worker. Only the newly configured times start now.
+                rows = (await session.execute(select(VideoRun.id, VideoRun.scheduled_for).where(*pending))).all()
+                obsolete = []
+                for run_id, timestamp in rows:
+                    slot = timestamp if timestamp.tzinfo else timestamp.replace(tzinfo=timezone.utc)
+                    if not scheduled_slots(series, slot, slot):
+                        obsolete.append(run_id)
+                await session.execute(delete(VideoRun).where(*pending, VideoRun.id.in_(obsolete)))
+            else:
+                await session.execute(delete(VideoRun).where(*pending))
         series.updated_at = datetime.now(timezone.utc)
         await session.commit()
         await session.refresh(series)
@@ -341,6 +363,18 @@ async def cancel_run(run_id: str):
     return await _run_action(run_id, "cancel")
 
 
+@router.put("/youtube/client")
+async def configure_youtube(request: Request):
+    raw = bytearray()
+    async for chunk in request.stream():
+        if len(raw) + len(chunk) > 65536:
+            raise HTTPException(413, "Google client file exceeds 64 KiB.")
+        raw.extend(chunk)
+    async with SessionLocal() as session:
+        await youtube.save_web_client(session, bytes(raw))
+    return {"configured": True}
+
+
 @router.get("/youtube/connect")
 async def connect_youtube():
     async with SessionLocal() as session:
@@ -349,15 +383,18 @@ async def connect_youtube():
 
 @public_router.get("/api/automation/youtube/callback")
 async def youtube_callback(code: str | None = None, state: str = "", error: str | None = None):
-    if error:
-        # Never reflect OAuth's provider-supplied error text into the response.
-        raise HTTPException(status_code=400, detail="YouTube authorization was not completed")
-    if not code or not state:
-        raise HTTPException(status_code=400, detail="YouTube authorization was not completed")
-    async with SessionLocal() as session:
-        await youtube.oauth_callback(session, code=code, state=state)
-    if cfg.frontend_url:
-        return RedirectResponse(cfg.frontend_url.rstrip("/") + "/studio?youtube=connected", status_code=303)
+    try:
+        if error or not code or not state:
+            raise HTTPException(400, "YouTube authorization was not completed")
+        async with SessionLocal() as session:
+            await youtube.oauth_callback(session, code=code, state=state)
+    except HTTPException:
+        if cfg.studio_url:
+            outcome = "cancelled" if error == "access_denied" else "error"
+            return RedirectResponse(f"{cfg.studio_url}?youtube={outcome}", status_code=303)
+        raise
+    if cfg.studio_url:
+        return RedirectResponse(f"{cfg.studio_url}?youtube=connected", status_code=303)
     return {"connected": True}
 
 

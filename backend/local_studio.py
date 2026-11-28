@@ -15,7 +15,7 @@ class PhoneFiles(StaticFiles):
     async def get_response(self, path, scope):
         # Client-side navigation needs index.html even when opened via a deep link.
         section = scope['path'].strip('/').partition('/')[0]
-        if section in {'', 'login', 'studio', 'projects', 'tasks', 'c', 'approvals',
+        if section in {'', 'login', 'studio', 'chats', 'projects', 'tasks', 'c', 'approvals',
                        'connectors', 'reminders', 'settings'}:
             path = 'index.html'
         response = await super().get_response(path, scope)

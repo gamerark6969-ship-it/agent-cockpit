@@ -150,19 +150,19 @@ async def delete_project(project_id: str):
         project = await session.get(Project, project_id)
         if project is None:
             raise HTTPException(status_code=404, detail="project not found")
-        tasks = (
-            await session.execute(select(Task).where(Task.project_id == project_id))
-        ).scalars().all()
-        for task in tasks:
-            if task.status in ACTIVE_STATUSES:
-                worker.request_stop(task.id)
-                if not worker.is_active(task.id):
-                    task.status = "stopped"
-                    task.updated_at = utcnow()
-                    await session.flush()
-                    await _emit_event(task.id, "task_stopped", {"reason": "project deleted"})
+        sandbox_ids = list(await session.scalars(select(Task.sandbox_id).where(
+            Task.project_id == project_id, Task.sandbox_id.is_not(None)
+        ).distinct()))
+        active_ids = list(await session.scalars(
+            select(Task.id).where(Task.project_id == project_id, Task.status.in_(ACTIVE_STATUSES))
+        ))
         await session.delete(project)
         await session.commit()
+    for task_id in active_ids:
+        if worker.is_active(task_id):
+            worker.request_stop(task_id)
+    for sandbox_id in sandbox_ids:
+        await sbx_mod.kill(sandbox_id)
     return Response(status_code=204)
 
 
@@ -344,7 +344,7 @@ async def stream_events(task_id: str, after: int = Query(default=0, ge=0)):
                     }
                     last = e.seq
                     yield f"event: event\nid: {e.seq}\ndata: {json.dumps(data, default=str)}\n\n"
-                if task_row is not None and task_row.status in TERMINAL_STATUSES and not rows:
+                if task_row is None or (task_row.status in TERMINAL_STATUSES and not rows):
                     yield "event: end\ndata: {}\n\n"
                     return
                 # wait for broadcast or ping timeout
@@ -646,3 +646,19 @@ async def delete_connector(connector_id: str):
     if not await connectors_mod.delete(connector_id):
         raise HTTPException(status_code=404, detail="connector not found")
     return Response(status_code=204)
+
+
+@router.post("/api/connectors/{connector_id}/check-model")
+async def check_connector_model(connector_id: str):
+    from ..agent.provider_store import PROVIDER_DEFAULTS, check_model_catalog
+    from ..crypto import decrypt_json
+    from ..models import Connector
+
+    async with SessionLocal() as session:
+        connector = await session.get(Connector, connector_id)
+        if connector is None or connector.kind not in PROVIDER_DEFAULTS:
+            raise HTTPException(404, "Model connector not found")
+        if not connector.enabled:
+            raise HTTPException(409, "Enable the provider before checking its catalog.")
+        kind, config = connector.kind, decrypt_json(connector.config_enc)
+    return await check_model_catalog(kind, config)

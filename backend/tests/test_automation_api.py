@@ -34,6 +34,48 @@ class AutomationApiTests(unittest.IsolatedAsyncioTestCase):
         await self.client.aclose()
         await self.engine.dispose()
 
+    async def test_schedule_switch_discards_unstarted_reservations_and_never_backfills_before_activation(self):
+        from datetime import datetime, timedelta, timezone
+        from sqlalchemy import select
+        from app.config import settings
+
+        self.client.headers["Authorization"] = f"Bearer {settings.APP_TOKEN}"
+        now = datetime.now(timezone.utc)
+        earlier = (now - timedelta(minutes=15)).strftime("%H:%M")
+        later = (now + timedelta(hours=1)).strftime("%H:%M")
+        created = await self.client.post("/api/automation/series", json={
+            "name": "Scheduler test", "brief": "A sufficiently long test brief.", "publish_times": [earlier, later],
+        })
+        series_id = created.json()["id"]
+        path = f"/api/automation/series/{series_id}"
+        async def slots():
+            async with self.sessions() as session:
+                return list(await session.scalars(select(VideoRun.scheduled_for).where(VideoRun.scheduled_for.is_not(None))))
+        await api.service.reserve_scheduled_slots(now + timedelta(seconds=1))
+        first = await slots()
+        self.assertTrue(first)
+        self.assertTrue(all(slot.replace(tzinfo=timezone.utc) > now for slot in first))
+        async with self.sessions() as session:
+            kept_id = await session.scalar(select(VideoRun.id).where(VideoRun.scheduled_for == min(first)))
+        await self.client.patch(path, json={"publish_times": [later]})
+        async with self.sessions() as session:
+            self.assertIsNotNone(await session.get(VideoRun, kept_id))
+        manual = await self.client.post(path + "/run")
+        self.assertEqual(manual.status_code, 201)
+        self.assertEqual((await self.client.patch(path, json={"enabled": False})).status_code, 200)
+        self.assertEqual(await slots(), [])
+        await api.service.reserve_scheduled_slots(now + timedelta(seconds=3))
+        self.assertEqual(await slots(), [])
+        self.assertEqual(await api.service.claim_one(), manual.json()["id"])
+        self.assertEqual((await self.client.patch(path, json={"enabled": True, "publish_times": [later]})).status_code, 200)
+        await api.service.reserve_scheduled_slots(now + timedelta(seconds=5))
+        self.assertTrue(await slots())
+        self.assertTrue(all(slot.strftime("%H:%M") == later for slot in await slots()))
+        await self.client.patch(path, json={"publish_times": [earlier]})
+        await api.service.reserve_scheduled_slots(now + timedelta(seconds=6))
+        self.assertTrue(await slots())
+        self.assertTrue(all(slot.strftime("%H:%M") == earlier and slot.replace(tzinfo=timezone.utc) > now for slot in await slots()))
+
     async def test_series_run_status_and_authenticated_contract(self):
         with TemporaryDirectory() as temp, patch.object(automation_settings, "storage_dir", Path(temp)):
             response = await self.client.get("/api/automation/status", headers={"Authorization": "Bearer " + __import__("app.config", fromlist=["settings"]).settings.APP_TOKEN})
@@ -181,6 +223,52 @@ class AutomationApiTests(unittest.IsolatedAsyncioTestCase):
         async with self.sessions() as session:
             with patch.object(charts, "read_chart", AsyncMock(side_effect=AssertionError("Disabled chart read"))):
                 self.assertEqual(await charts.select_music(session, "chart"), (None, "Using generated score."))
+
+    async def test_hosted_youtube_client_setup_is_encrypted_and_origin_bound(self):
+        import json
+        import os
+        from urllib.parse import parse_qs, urlsplit
+        from app.config import settings
+        from app.crypto import decrypt_json
+        from app.automation.models import YouTubeClient
+        from app.automation.youtube import client_settings
+
+        endpoint = "/api/automation/youtube/client"
+        callback = "https://agent-cockpit-backend.onrender.com/api/automation/youtube/callback"
+        headers = {"Authorization": f"Bearer {settings.APP_TOKEN}", "Host": "untrusted.test",
+                   "X-Forwarded-Host": "untrusted.test"}
+        web = {"client_id":"public-id", "client_secret":"private-fixture",
+               "auth_uri":"https://untrusted.test", "token_uri":"https://untrusted.test",
+               "redirect_uris":[callback]}
+        with (patch.dict(os.environ, {"RENDER_EXTERNAL_URL": "https://agent-cockpit-backend.onrender.com"}),
+              patch.object(automation_settings, "youtube_client_id", None),
+              patch.object(automation_settings, "youtube_client_secret", None),
+              patch.object(automation_settings, "youtube_client_file", None),
+              patch.object(automation_settings, "youtube_redirect_uri", None),
+              patch.object(automation_settings, "public_base_url", None),
+              patch.object(automation_settings, "frontend_url", None),
+              patch.object(settings, "PUBLIC_BASE_URL", None)):
+            self.assertEqual((await self.client.put(endpoint, json={"web":web})).status_code, 401)
+            for body in ({"installed":web}, {"web": dict(web, redirect_uris=["https://untrusted.test"])}):
+                rejected = await self.client.put(endpoint, headers=headers, json=body)
+                self.assertEqual(rejected.status_code, 422)
+                self.assertNotIn("private-fixture", rejected.text)
+            saved = await self.client.put(endpoint, headers=headers, json={"web":web})
+            self.assertEqual(saved.json(), {"configured": True})
+            status = (await self.client.get("/api/automation/status", headers=headers)).json()["youtube"]
+            self.assertEqual((status["redirect_uri"],status["client_source"],status["configured"]), (callback,"studio",True))
+            self.assertNotIn("private-fixture", json.dumps(status))
+            async with self.sessions() as session:
+                stored = await session.get(YouTubeClient, 1)
+                self.assertNotIn("private-fixture", stored.config_enc)
+                self.assertEqual(set(decrypt_json(stored.config_enc)), {"client_id","client_secret"})
+                self.assertEqual(await client_settings(session), (("public-id","private-fixture"),"studio"))
+            connect = (await self.client.get("/api/automation/youtube/connect", headers=headers)).json()
+            url = urlsplit(connect["authorization_url"])
+            self.assertEqual(url.netloc, "accounts.google.com")
+            self.assertEqual(parse_qs(url.query)["redirect_uri"], [callback])
+            denied = await self.client.get("/api/automation/youtube/callback?error=access_denied&return_url=https://untrusted.test", headers=headers)
+            self.assertEqual(denied.headers["location"], "https://agent-cockpit-pwa.onrender.com/studio?youtube=cancelled")
 
     async def test_review_upload_actions_and_unknown_ids(self):
         async with self.sessions() as session:
