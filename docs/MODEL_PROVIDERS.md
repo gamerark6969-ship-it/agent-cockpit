@@ -6,6 +6,7 @@ configured coding/chat routes; `/api/automation/status` also includes generation
 
 | Model ID | Protocol | Configuration |
 | --- | --- | --- |
+| `auto/gpt-6.1-sol` | Configured GPT routes | Optional video series setting, available when at least one listed FreeGG, AgentRouter OpenAI, or Xingchi route is configured |
 | `freegg/gpt-6.1-sol` | Responses | FreeGG connector or `FREEGG_API_KEY` |
 | `agentrouter-openai/gpt-6.1-sol` | Responses | AgentRouter connector or `AGENTROUTER_OPENAI_API_KEY` |
 | `agentrouter-openai-two/gpt-6.1-sol` | Responses | AgentRouter Two connector |
@@ -19,6 +20,13 @@ OpenAI key uses **separate** `AGENTROUTER_OPENAI_*` settings so it is never sent
 
 New pinned provider routes have no unrelated automatic provider fallback. Video automatic mode
 tries configured FreeGG, then OpenCode, then CPU inference. CPU fallback never calls Ollama Cloud.
+
+In the Studio series editor, choose **GPT-6.1 Sol · FreeGG / AgentRouter / Xingchi failover**
+to try those providers in order if a request fails or times out. The series skips unconfigured
+routes and tries the secondary AgentRouter or Xingchi connector after its primary connector.
+The configured accounts' quotas and rates apply. If all selected routes fail, the run reports
+the attempted routes. Leave the Model field on **Automatic · FreeGG / OpenCode / CPU** for
+the existing free workflow.
 
 `scripts/import_model_providers.py --apply` imports requested providers from the user's own
 OpenCode configuration into encrypted connectors. It does not modify OpenCode or print key values.

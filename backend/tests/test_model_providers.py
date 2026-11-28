@@ -49,6 +49,32 @@ class ModelProviderTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(RuntimeError):
             await models.generate_text("hello",model="unknown/paid-model")
 
+    async def test_sol_failover_tries_only_configured_sol_accounts_in_order(self):
+        first, _, second, _, third = models.SOL_ROUTES
+        configured = ["opencode/gpt-6.1-sol", third, second, "gemini-pro-latest", first]
+        provider = AsyncMock(side_effect=[TimeoutError(), TimeoutError(), "script"])
+        with patch.object(models, "list_pa_models", return_value=configured), patch.object(models, "_generate_provider_text", provider):
+            self.assertIn(models.SOL_FAILOVER, models.list_generation_models())
+            self.assertEqual(await models.generate_text("story", models.SOL_FAILOVER, "system"), "script")
+        self.assertEqual([call.args for call in provider.await_args_list],
+                         [("story", route, "system") for route in (first, second, third)])
+
+    async def test_sol_exhaustion_and_pinned_route_leave_unrelated_accounts_unused(self):
+        first, second, *_ = models.SOL_ROUTES
+        provider = AsyncMock(side_effect=TimeoutError)
+        with patch.object(models, "list_pa_models", return_value=[first, second, "opencode/gpt-6.1-sol"]), patch.object(models, "_generate_provider_text", provider):
+            with self.assertRaisesRegex(RuntimeError, "providers unavailable"):
+                await models.generate_text("story", models.SOL_FAILOVER)
+            self.assertEqual([call.args[1] for call in provider.await_args_list], [first, second])
+            provider.reset_mock()
+            with self.assertRaises(TimeoutError):
+                await models.generate_text("story", first)
+            provider.assert_awaited_once_with("story", first, "")
+        with patch.object(models, "list_pa_models", return_value=["opencode/gpt-6.1-sol"]):
+            self.assertNotIn(models.SOL_FAILOVER, models.list_generation_models())
+            with self.assertRaisesRegex(RuntimeError, "No GPT"):
+                await models.generate_text("story", models.SOL_FAILOVER)
+
     async def test_exhausted_free_quota_uses_cpu_backup_for_automatic_generation(self):
         with patch("app.agent.models.list_pa_models",return_value=[]), patch("app.agent.models.shutil.which",return_value="opencode"), \
              patch.object(settings,"LOCAL_LLM_ENABLED",True), \

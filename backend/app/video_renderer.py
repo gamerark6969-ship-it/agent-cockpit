@@ -50,6 +50,14 @@ async def _command(*args: str, timeout: int = 120) -> bytes:
             await process.wait()
 
 
+async def validate_music(path: Path) -> None:
+    samples = await _command(_ffmpeg(), "-v", "error", "-xerror", "-f", "mp3",
+                             "-i", str(path), "-map", "0:a:0", "-t", "60",
+                             "-ac", "1", "-ar", "8000", "-f", "s16le", "-", timeout=30)
+    if len(samples) < 1600:
+        raise ValueError("Track contains less than 100 ms of audio")
+
+
 async def _speech(text: str, target: Path, voice: str) -> tuple[float, list[dict], str]:
     """Produce real narration; never substitute silence after provider failure."""
     words = []
@@ -191,7 +199,7 @@ def _frame(scene: dict, title: str, t: float, duration: float, words: list[dict]
     return image
 
 
-async def render_video(manifest: dict, output_dir: Path, *, voice: str = "en-US-AriaNeural") -> dict:
+async def render_video(manifest: dict, output_dir: Path, *, voice: str = "en-US-AriaNeural", music_path: Path | None = None) -> dict:
     scenes = validate_manifest(manifest)
     output_dir = Path(output_dir).resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -226,7 +234,8 @@ async def render_video(manifest: dict, output_dir: Path, *, voice: str = "en-US-
             end = timing["start"] + group[-1]["start"] + group[-1]["duration"]
             subtitles.append(f"{len(subtitles)+1}\n{_srt_timestamp(start)} --> {_srt_timestamp(end)}\n{' '.join(w['text'] for w in group)}\n")
     (output_dir / "captions.srt").write_text("\n".join(subtitles),encoding="utf-8")
-    await asyncio.to_thread(_score,output_dir / "score.wav",duration)
+    if music_path is None:
+        await asyncio.to_thread(_score,output_dir / "score.wav",duration)
     (output_dir / "manifest.json").write_text(json.dumps(manifest,ensure_ascii=False),encoding="utf-8")
     (output_dir / "timeline.json").write_text(json.dumps(timeline,ensure_ascii=False),encoding="utf-8")
     labels = "".join(f"[{i+1}:a]" for i in range(len(audio)))
@@ -234,8 +243,15 @@ async def render_video(manifest: dict, output_dir: Path, *, voice: str = "en-US-
                "-s",f"{width}x{height}","-r",str(fps),"-i","pipe:0"]
     for i in range(len(audio)):
         command += ["-i",str(output_dir / f"voice-{i}.wav")]
-    command += ["-i",str(output_dir / "score.wav")]
-    command += ["-filter_complex", f"{labels}concat=n={len(audio)}:v=0:a=1[voice];[voice][{len(audio)+1}:a]amix=inputs=2:duration=longest:normalize=0,loudnorm=I=-16:TP=-1.5:LRA=9,apad[a]",
+    music_input = f"[{len(audio)+1}:a]"
+    if music_path is None:
+        command += ["-i", str(output_dir / "score.wav")]
+        music_filter = ""
+    else:
+        command += ["-stream_loop", "-1", "-f", "mp3", "-i", str(music_path)]
+        music_filter = f"{music_input}atrim=duration={duration},volume=0.12[bed];"
+        music_input = "[bed]"
+    command += ["-filter_complex", f"{labels}concat=n={len(audio)}:v=0:a=1[voice];{music_filter}[voice]{music_input}amix=inputs=2:duration=longest:normalize=0,loudnorm=I=-16:TP=-1.5:LRA=9,apad[a]",
                 "-map","0:v","-map","[a]","-t",str(duration),"-c:v","libx264","-preset","veryfast",
                 "-crf","21","-pix_fmt","yuv420p","-c:a","aac","-b:a","128k","-movflags","+faststart",str(target)]
     process = await asyncio.create_subprocess_exec(*command,stdin=asyncio.subprocess.PIPE,stderr=asyncio.subprocess.PIPE)
@@ -263,7 +279,7 @@ async def render_video(manifest: dict, output_dir: Path, *, voice: str = "en-US-
         if process.returncode is None:
             process.kill()
             await process.wait()
-    checks = {"full_decode":"passed","audio":"real_narration","caption_timing":[a[2] for a in audio],
+    checks = {"music": "uploaded" if music_path else "generated", "full_decode":"passed","audio":"real_narration","caption_timing":[a[2] for a in audio],
               "fps":fps,"renderer":"procedural-illustrated-v1"}
     return {"path":str(target),"thumbnail_path":str(thumbnail),"duration_seconds":duration,
             "width":width,"height":height,"checks":checks}

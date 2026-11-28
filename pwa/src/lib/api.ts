@@ -25,7 +25,7 @@ export function clearToken(): void {
   localStorage.removeItem(TOKEN_KEY);
 }
 
-async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
+export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers);
   const token = getToken();
   if (token) headers.set("Authorization", `Bearer ${token}`);
@@ -161,6 +161,7 @@ export interface PushSubscriptionInput {
 }
 
 export interface AutomationSeries {
+  music_name: string | null;
   id: string;
   name: string;
   brief: string;
@@ -180,7 +181,7 @@ export interface AutomationSeries {
 
 export type AutomationSeriesInput = Omit<
   AutomationSeries,
-  "id" | "created_at" | "updated_at"
+  "id" | "created_at" | "updated_at" | "music_name"
 >;
 
 export interface AutomationEvent {
@@ -370,6 +371,18 @@ export function updateAutomationSeries(id: string, body: Partial<AutomationSerie
     method: "PATCH",
     body: JSON.stringify(body),
   });
+}
+
+export function setSeriesMusic(id: string, file: File) {
+  return apiFetch<AutomationSeries>(`/api/automation/series/${encodeURIComponent(id)}/music?name=${encodeURIComponent(file.name)}`, {
+    method: "PUT",
+    headers: { "Content-Type": "audio/mpeg" },
+    body: file,
+  });
+}
+
+export function clearSeriesMusic(id: string) {
+  return apiFetch<AutomationSeries>(`/api/automation/series/${encodeURIComponent(id)}/music`, { method: "DELETE" });
 }
 
 export function startAutomationRun(seriesId: string) {

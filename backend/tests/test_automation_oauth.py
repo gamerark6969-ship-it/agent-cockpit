@@ -1,4 +1,7 @@
 import hashlib
+import json
+from pathlib import Path
+from tempfile import TemporaryDirectory
 import unittest
 from urllib.parse import parse_qs, urlparse
 from unittest.mock import patch
@@ -90,6 +93,47 @@ class OAuthStateTests(unittest.IsolatedAsyncioTestCase):
             token_exchange = _FakeGoogleClient.requests[0][1]
             self.assertEqual(token_exchange["data"]["code"], "one-time-code")
             self.assertNotIn("client-secret", str(url))
+
+    async def test_client_file_can_be_supplied_and_rotated_after_start(self):
+        from app.automation.youtube import _access_token, GOOGLE_AUTH, GOOGLE_TOKEN
+        from app.crypto import encrypt_json
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "client.json"
+            with (
+                patch.object(automation_settings, "youtube_client_file", path),
+                patch.object(automation_settings, "youtube_client_id", None),
+                patch.object(automation_settings, "youtube_client_secret", None),
+                patch.object(automation_settings, "youtube_redirect_uri", "http://localhost/callback"),
+                patch("app.automation.youtube.httpx.AsyncClient", _FakeGoogleClient),
+            ):
+                self.assertFalse(automation_settings.youtube_configured)
+                for content in [b"incomplete", b'{"installed":{"client_id":"i","client_secret":"s"}}', b'{"web":null}']:
+                    path.write_bytes(content)
+                    self.assertFalse(automation_settings.youtube_configured)
+                web = {"client_id":"file-id", "client_secret":"file-secret", "auth_uri":"https://invalid.test",
+                       "token_uri":"https://invalid.test", "redirect_uris":["https://invalid.test"]}
+                path.write_text(json.dumps({"web":web}))
+                self.assertTrue(automation_settings.youtube_configured)
+                with patch.object(automation_settings, "youtube_client_id", "env"), patch.object(automation_settings, "youtube_client_secret", "env-secret"):
+                    self.assertEqual(automation_settings.youtube_credentials(), ("env","env-secret"))
+                async with self.sessions() as session:
+                    url = await authorization_url(session)
+                    self.assertEqual(url.split("?")[0], GOOGLE_AUTH)
+                    query = parse_qs(urlparse(url).query)
+                    self.assertEqual(query["client_id"], ["file-id"])
+                    self.assertEqual(query["redirect_uri"], ["http://localhost/callback"])
+                    _FakeGoogleClient.requests = []
+                    await oauth_callback(session, code="fixture", state=query["state"][0])
+                    self.assertEqual(_FakeGoogleClient.requests[0][0], GOOGLE_TOKEN)
+                    self.assertEqual(_FakeGoogleClient.requests[0][1]["data"]["client_secret"], "file-secret")
+                    record = await session.get(YouTubeCredential, 1)
+                    record.tokens_enc = encrypt_json({"refresh_token":"fixture"})
+                    await session.commit()
+                    web["client_secret"] = "rotated"
+                    path.write_text(json.dumps({"web":web}))
+                    await _access_token(session)
+                    self.assertEqual(_FakeGoogleClient.requests[-1][0], GOOGLE_TOKEN)
+                    self.assertEqual(_FakeGoogleClient.requests[-1][1]["data"]["client_secret"], "rotated")
 
     async def test_authorization_failure_does_not_reflect_provider_error_body(self):
         class FailingClient(_FakeGoogleClient):

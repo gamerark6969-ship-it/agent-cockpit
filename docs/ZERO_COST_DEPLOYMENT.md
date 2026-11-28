@@ -122,3 +122,11 @@ The coding cockpit also runs through free Docker workspaces on the Actions runne
 - Docker's local engine was unavailable in this development environment. Container commands, per-task ownership, timeout cleanup, and durable controls have offline tests; verify the actual Docker build/run on the GitHub runner before relying on repository tasks.
 
 Sources checked: [Render Free](https://render.com/docs/free), [GitHub Actions billing](https://docs.github.com/en/billing/concepts/product-billing/github-actions), [Neon pricing](https://neon.com/pricing), [Supabase S3 authentication](https://supabase.com/docs/guides/storage/s3/authentication), [Hugging Face Spaces](https://huggingface.co/docs/hub/spaces-overview), and [OpenCode models](https://opencode.ai/docs/zen/). Hugging Face's current docs require a paid plan to create Docker Spaces; its static hosting remains an optional frontend destination. Rentry is a document host rather than a production Python worker.
+
+### Chart-selected background music
+
+Open **Studio → Your series → Chart music**. Enter a YouTube chart playlist URL or ID and choose **Use playlist**. Connect YouTube in Studio so the worker can read the playlist with the existing read-only permission. Choose a playlist whose order represents your desired chart ranking.
+
+Add up to three licensed MP3s of 4 MiB each. For each file enter the exact 11-character YouTube video ID of its entry in the chart. At render time the worker reads the first 50 chart entries and mixes the highest-ranked matching upload beneath the narration. If the chart is unavailable or has no matching upload, it uses your series background track or the generated score. The run activity reports the selection. Disabling the chart preserves your uploaded candidates.
+
+Each chart lookup uses one YouTube Data API quota unit. [Google playlistItems.list reference](https://developers.google.com/youtube/v3/docs/playlistItems/list)

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
+import ChartMusic from "../components/ChartMusic";
 import * as api from "../lib/api";
 import { btnGhost, btnPrimary, card, inputBase, label } from "../lib/ui";
 
@@ -11,6 +12,7 @@ const blank = (): api.AutomationSeriesInput => ({
 });
 const terminal = new Set(["published", "uploaded", "failed", "cancelled"]);
 const modelLabel = (name: string) => {
+  if (name === "auto/gpt-6.1-sol") return "GPT-6.1 Sol · FreeGG / AgentRouter / Xingchi failover";
   const labels: Record<string,string> = { freegg:"FreeGG", "agentrouter-openai":"AgentRouter", "agentrouter-openai-two":"AgentRouter Two", xingchi:"Xingchi", xingchi2:"Xingchi 2" };
   const provider = name.split("/")[0];
   return labels[provider] ? `GPT-6.1 Sol · ${labels[provider]}` : name.replace("opencode/", "OpenCode · ").replace("local/", "Free CPU · ");
@@ -25,6 +27,9 @@ export default function Automation() {
   const [detail, setDetail] = useState<api.AutomationRun | null>(null);
   const [form, setForm] = useState(blank);
   const [editing, setEditing] = useState("");
+  const [music, setMusic] = useState<File | null>(null);
+  const [removeMusic, setRemoveMusic] = useState(false);
+  const currentMusic = series.find(item => item.id === editing)?.music_name;
   const [showForm, setShowForm] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -92,7 +97,8 @@ export default function Automation() {
     }, "Run updated");
   }
   function edit(item: api.AutomationSeries) {
-    const { id, created_at: _created, updated_at: _updated, ...input } = item;
+    const { id, created_at: _created, updated_at: _updated, music_name: _music, ...input } = item;
+    setMusic(null); setRemoveMusic(false);
     setEditing(id); setForm({ ...input, publish_times: [...input.publish_times] }); setShowForm(true);
   }
   const update = (patch: Partial<api.AutomationSeriesInput>) => setForm(current => ({ ...current, ...patch }));
@@ -117,7 +123,7 @@ export default function Automation() {
       <div><p className="mb-2 text-xs font-medium uppercase tracking-widest text-emerald-400">YouTube automation</p>
         <h1 className="text-3xl font-semibold tracking-tight">Your video studio</h1>
         <p className="mt-2 text-sm text-muted">Original stories. Daily production. Everything from your phone.</p></div>
-      <button className={btnPrimary} onClick={() => { setEditing(""); setForm(blank()); setShowForm(true); }}>New series</button>
+      <button className={btnPrimary} disabled={busy} onClick={() => { setEditing(""); setMusic(null); setRemoveMusic(false); setForm(blank()); setShowForm(true); }}>New series</button>
     </header>
     {error && <p role="alert" className="mb-4 rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-300">{error}</p>}
     {message && <p role="status" className="mb-4 rounded-xl bg-emerald-500/10 p-3 text-sm text-emerald-300">{message}</p>}
@@ -132,7 +138,7 @@ export default function Automation() {
       <div className={`${card} p-4`}><p className="text-xs text-muted">Production engine</p>
         <p className="my-2 font-medium">{status?.renderer.available ? "Renderer ready" : "Renderer needs setup"}</p>
         <p className="text-xs leading-relaxed text-muted">{status?.renderer.detail || "Checking the backend…"}</p>
-        <p className="mt-2 text-xs text-muted">{status?.worker.running ? "Worker is online" : "Scheduled cloud worker"}</p></div>
+        <p className="mt-2 text-xs text-muted">{!status ? "Checking worker…" : status.worker.running ? "Local worker is online" : status.worker.enabled ? "Local worker is offline" : "Local worker is disabled"}</p></div>
       <div className={`${card} p-4`}><p className="text-xs text-muted">Generation & storage</p>
         <p className="my-2 font-medium">{status?.models.length || 0} available models</p>
         <p className="text-xs text-muted">FreeGG and OpenCode, with a free CPU backup for quota outages. Configured GPT routes are selectable.</p>
@@ -141,13 +147,24 @@ export default function Automation() {
     {showForm && <form className={`${card} mb-6 space-y-4 p-5`} onSubmit={event => {
       event.preventDefault();
       void perform(async () => {
-        if (editing) await api.updateAutomationSeries(editing, form);
-        else await api.createAutomationSeries(form);
+        if (editing) {
+          if (music) await api.setSeriesMusic(editing, music);
+          else if (removeMusic) await api.clearSeriesMusic(editing);
+          await api.updateAutomationSeries(editing, form);
+        } else {
+          const created = await api.createAutomationSeries(music ? { ...form, enabled: false } : form);
+          setEditing(created.id);
+          setSeries(items => [...items.filter(item => item.id !== created.id), created]);
+          if (music) {
+            await api.setSeriesMusic(created.id, music);
+            if (form.enabled) await api.updateAutomationSeries(created.id, { enabled: true });
+          }
+        }
         setShowForm(false);
       }, editing ? "Series updated" : "Series created");
     }}>
       <div className="flex items-center justify-between"><h2 className="text-lg font-semibold">{editing ? "Edit series" : "Create a series"}</h2>
-        <button type="button" className={btnGhost} onClick={() => setShowForm(false)}>Close</button></div>
+        <button type="button" disabled={busy} className={btnGhost} onClick={() => setShowForm(false)}>Close</button></div>
       <label className={label}>Series name<input className={`${inputBase} mt-1`} required maxLength={120} value={form.name} onChange={e => update({ name: e.target.value })} /></label>
       <label className={label}>Creative brief<textarea className={`${inputBase} mt-1 min-h-28`} required minLength={10} maxLength={8000} value={form.brief}
         placeholder="Describe your audience, characters, tone, and the stories you want to tell."
@@ -166,6 +183,21 @@ export default function Automation() {
           <option value="public">Public</option><option value="unlisted">Unlisted</option><option value="private">Private · commissioning test</option></select></label>
         <label className={label}>Voice<input className={`${inputBase} mt-1`} required value={form.voice} onChange={e => update({ voice: e.target.value })} /></label>
       </div>
+      <fieldset disabled={busy} className="min-w-0 space-y-2"><legend className={label}>Background music</legend>
+        <p className="text-xs text-muted">Choose an MP3 up to 12 MiB that you own or have licensed for YouTube. New videos in this series reuse the track.</p>
+        <a href="https://charts.youtube.com/charts/TopShortsSongs/global/daily" target="_blank" rel="noreferrer" className="inline-block py-1 text-sm text-emerald-400 underline">Explore top songs on YouTube Shorts ↗</a>
+        {currentMusic && <p className="break-all text-sm">{removeMusic ? "Track will be removed on save" : `Current track · ${currentMusic}`}</p>}
+        <input key={editing + String(showForm)} aria-label="Select background MP3" type="file" accept=".mp3,audio/mpeg" className={`${inputBase} w-full min-w-0 text-sm`}
+          onChange={event => {
+            const file = event.target.files?.[0] || null;
+            if (file && (!file.size || file.size > 12 * 1024 * 1024 || !/\.mp3$/i.test(file.name))) {
+              setError("Choose a nonempty MP3 up to 12 MiB."); event.target.value = ""; setMusic(null); return;
+            }
+            setError(""); setMusic(file); setRemoveMusic(false);
+          }} />
+        {music && <p className="break-all text-xs text-muted">Selected · {music.name}</p>}
+        {currentMusic && !music && <button type="button" className={btnGhost} onClick={() => setRemoveMusic(!removeMusic)}>{removeMusic ? "Keep track" : "Remove track"}</button>}
+      </fieldset>
       <fieldset><legend className={label}>Daily production times · 1–3 slots</legend><div className="mt-2 flex flex-wrap items-center gap-2">
         {form.publish_times.map((time,index) => <div className="flex items-center gap-1" key={index}>
           <input aria-label={`Production time ${index+1}`} type="time" required className={inputBase} value={time} onChange={e => update({ publish_times: form.publish_times.map((t,i) => i === index ? e.target.value : t) })} />
@@ -185,12 +217,13 @@ export default function Automation() {
         <div className="space-y-3">{series.map(item => <article key={item.id} className={`${card} p-4`}>
           <div className="flex justify-between gap-3"><h3 className="font-medium">{item.name}</h3><span className="text-xs text-emerald-400">{item.enabled ? "Scheduled" : "Paused"}</span></div>
           <p className="mt-2 line-clamp-2 text-sm text-muted">{item.brief}</p>
+          {item.music_name && <p className="mt-2 break-all text-xs text-muted">Music · {item.music_name}</p>}
           <p className="mt-3 text-xs text-muted">{item.publish_times.join(" · ")} / {item.timezone} · {item.publish_mode === "auto" ? "Automatic" : "Review first"}</p>
           <div className="mt-3 flex flex-wrap gap-2">
-            <button className={btnPrimary} disabled={busy} onClick={() => void perform(async () => { const run = await api.startAutomationRun(item.id); setSelected(run.id); }, "Run queued for the cloud worker")}>Run now</button>
+            <button className={btnPrimary} disabled={busy} onClick={() => void perform(async () => { const run = await api.startAutomationRun(item.id); setSelected(run.id); }, "Run queued for production")}>Run now</button>
             <button className={btnGhost} disabled={busy} onClick={() => edit(item)}>Edit</button>
             <button className={btnGhost} disabled={busy} onClick={() => void perform(() => api.updateAutomationSeries(item.id,{ enabled: !item.enabled }),item.enabled ? "Series paused" : "Schedule enabled")}>{item.enabled ? "Pause" : "Enable"}</button>
-          </div></article>)}</div></section>
+          </div><ChartMusic seriesId={item.id} /></article>)}</div></section>
         <section><h2 className="mb-3 text-lg font-semibold">Production history</h2>
           <div className={`${card} overflow-hidden`}>{!runs.length && <p className="p-6 text-sm text-muted">Your video runs will appear here.</p>}
             {runs.map(run => <button key={run.id} onClick={() => setSelected(run.id)} className={`block w-full border-b border-white/5 p-4 text-left last:border-0 ${selected === run.id ? "bg-white/5" : "hover:bg-white/5"}`}>

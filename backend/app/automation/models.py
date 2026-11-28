@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, JSON, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, Index, Integer, LargeBinary, JSON, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ..models import Base, new_id, utcnow
@@ -22,10 +22,26 @@ class VideoSeries(Base):
     privacy: Mapped[str] = mapped_column(String(16), nullable=False, default="public")
     language: Mapped[str] = mapped_column(String(16), nullable=False, default="en")
     voice: Mapped[str] = mapped_column(String(80), nullable=False, default="en-US-AriaNeural")
+    chart_playlist: Mapped[str | None] = mapped_column(String(128))
+    music_name: Mapped[str | None] = mapped_column(String(160))
+    music_data: Mapped[bytes | None] = mapped_column(LargeBinary, deferred=True)
     made_for_kids: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     contains_synthetic_media: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow)
+
+
+class ChartTrack(Base):
+    __tablename__ = "automation_chart_tracks"
+    __table_args__ = (
+        UniqueConstraint("series_id", "video_id"),
+        CheckConstraint("slot BETWEEN 1 AND 3"),
+    )
+    series_id: Mapped[str] = mapped_column(ForeignKey("automation_series.id", ondelete="CASCADE"), primary_key=True)
+    slot: Mapped[int] = mapped_column(Integer, primary_key=True)
+    video_id: Mapped[str] = mapped_column(String(11))
+    name: Mapped[str] = mapped_column(String(160))
+    audio: Mapped[bytes] = mapped_column(LargeBinary, deferred=True)
 
 
 class VideoRun(Base):

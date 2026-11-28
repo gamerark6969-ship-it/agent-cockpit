@@ -42,6 +42,7 @@ def main() -> None:
     parser.add_argument("--check-due", action="store_true", help="Only reserve slots and report true/false")
     parser.add_argument("--include-agent",action="store_true",help="Also process one queued coding/chat task")
     parser.add_argument("--check-agent",action="store_true",help="Report whether a coding workspace is needed")
+    parser.add_argument("--reminders", action="store_true", help="Deliver due reminders only")
     args = parser.parse_args()
     settings.validate_production_secrets()
     if settings.ENVIRONMENT in ("production", "prod"):
@@ -53,6 +54,10 @@ def main() -> None:
 
     async def execute():
         try:
+            if args.reminders:
+                from ..reminders import deliver_due
+                await deliver_due()
+                return
             from ..agent.provider_store import refresh_provider_routes
             await refresh_provider_routes()
             from ..cloud_tasks import next_cloud_task, run_cloud_task

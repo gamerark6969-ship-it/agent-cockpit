@@ -6,6 +6,7 @@ import logging
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 
 from sqlalchemy import and_, inspect as sa_inspect, or_, select, update
@@ -18,7 +19,7 @@ from .models import VideoRun, VideoRunEvent, VideoSeries
 from .schedule import scheduled_slots
 from .schemas import VideoManifest
 from .storage import media_url, run_directory, archive_media, restore_media
-from . import youtube
+from . import charts, youtube
 
 log = logging.getLogger("automation.worker")
 _TERMINAL = {"published", "uploaded", "failed", "cancelled"}
@@ -296,6 +297,8 @@ class AutomationService:
                         if run.cancel_requested:
                             await self._finish(session, run, "cancelled", "Run cancelled", fence)
                             return
+                        if result.get("music_selection"):
+                            await self._event(session, run.id, "music", result["music_selection"])
                         run.render_data = result
                         run.media_path = result["path"]
                         run.thumbnail_path = result["thumbnail_path"]
@@ -458,7 +461,15 @@ class AutomationService:
         except ImportError:
             raise RuntimeError("The video renderer is not available")
         output_dir = run_directory(run_id)
-        result = await video_renderer.render_video(manifest, output_dir, voice=series.voice)
+        async with self.session_factory() as session:
+            music, music_message = await charts.select_music(session, series.id)
+        if music:
+            with TemporaryDirectory(dir=output_dir) as directory:
+                music_path = Path(directory) / "track.mp3"
+                await asyncio.to_thread(music_path.write_bytes, music)
+                result = await video_renderer.render_video(manifest, output_dir, voice=series.voice, music_path=music_path)
+        else:
+            result = await video_renderer.render_video(manifest, output_dir, voice=series.voice)
         if not isinstance(result, dict):
             raise RuntimeError("Renderer returned invalid result")
         required = {"path", "thumbnail_path", "duration_seconds", "width", "height", "checks"}
@@ -474,6 +485,7 @@ class AutomationService:
             raise RuntimeError("Rendered video did not pass media and narration checks")
         if not 0 < int(result["width"]) < int(result["height"]) or path.stat().st_size > 45 * 1024 * 1024:
             raise RuntimeError("Rendered short must be portrait and below the free storage file-size limit")
+        result["music_selection"] = music_message
         archived = await archive_media(run_id, result)
         return {**result, **archived, "path": str(path), "thumbnail_path": str(thumb)}
 

@@ -16,6 +16,9 @@ from __future__ import annotations
 
 import logging
 import shutil
+import httpx
+from openai import APIError
+from pydantic_ai.exceptions import ModelAPIError
 from functools import lru_cache
 from typing import List, Optional
 
@@ -147,16 +150,37 @@ def any_configured() -> bool:
 
 FREE_MODELS = ("opencode/deepseek-v4.1-flash-free", "opencode/big-pickle", "opencode/mimo-v2.6-flash-free", "opencode/beam-free", "opencode/nemotron-3.5-lightning-free")
 
+SOL_FAILOVER = "auto/gpt-6.1-sol"
+SOL_ROUTES = tuple(f"{provider}/gpt-6.1-sol" for provider in (
+    "freegg", "agentrouter-openai", "agentrouter-openai-two", "xingchi", "xingchi2",
+))
+
 
 def list_generation_models() -> List[str]:
     """Free models use the real OpenCode client, not a spoofed gateway request."""
     local = [f"local/{settings.LOCAL_LLM_MODEL}"] if settings.LOCAL_LLM_ENABLED or settings.LOCAL_LLM_REMOTE_WORKER else []
-    return [*(FREE_MODELS if settings.OPENCODE_REMOTE_WORKER or shutil.which(settings.OPENCODE_BIN) else ()), *local, *list_pa_models()]
+    configured = list_pa_models()
+    pool = [SOL_FAILOVER] if any(route in configured for route in SOL_ROUTES) else []
+    return [*(FREE_MODELS if settings.OPENCODE_REMOTE_WORKER or shutil.which(settings.OPENCODE_BIN) else ()), *local, *pool, *configured]
 
 
 async def generate_text(prompt: str, model: str | None = None, system_prompt: str = "") -> str:
     from .opencode_runtime import FreeModelUnavailable, run_free_model
     from .local_inference import generate_local
+
+    if model == SOL_FAILOVER:
+        configured = list_pa_models()
+        attempted = []
+        for route in SOL_ROUTES:
+            if route in configured:
+                attempted.append(route)
+                try:
+                    return await _generate_provider_text(prompt, route, system_prompt)
+                except (ModelAPIError, APIError, httpx.TransportError, TimeoutError):
+                    log.warning("Video generation provider unavailable: %s", route)
+        if attempted:
+            raise RuntimeError("GPT-6.1 Sol providers unavailable: " + ", ".join(attempted))
+        raise RuntimeError("No GPT-6.1 Sol failover provider is configured")
 
     if model is None and "freegg/gpt-6.1-sol" in list_pa_models():
         try:
@@ -181,6 +205,10 @@ async def generate_text(prompt: str, model: str | None = None, system_prompt: st
         raise RuntimeError("Install OpenCode to use free models, or explicitly select a configured provider")
     if selected not in list_pa_models():
         raise RuntimeError("The selected model is not configured")
+    return await _generate_provider_text(prompt, selected, system_prompt)
+
+
+async def _generate_provider_text(prompt: str, selected: str, system_prompt: str) -> str:
     from pydantic_ai import Agent
 
     backed = build_single_model(selected)

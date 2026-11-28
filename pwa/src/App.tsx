@@ -11,10 +11,12 @@ import ProjectDetail from "./pages/ProjectDetail";
 import Projects from "./pages/Projects";
 import SettingsPage from "./pages/SettingsPage";
 import TaskMonitor from "./pages/TaskMonitor";
+import Reminders from "./pages/Reminders";
 import Automation from "./pages/Automation";
 
 function RequireAuth({ children }: { children: ReactNode }) {
-  if (!getToken()) return <Navigate to="/login" replace />;
+  const { pathname, search, hash } = useLocation();
+  if (!getToken()) return <Navigate to="/login" replace state={{ returnTo: pathname + search + hash }} />;
   return <>{children}</>;
 }
 
@@ -25,6 +27,7 @@ function Shell() {
     <div className={`${location.pathname === "/studio" ? "max-w-none" : "mx-auto max-w-md"} min-h-dvh bg-canvas text-fg`}>
       <div className={hideNav ? "" : "pb-nav"}>
         <Routes>
+          <Route path="/reminders" element={<RequireAuth><Reminders /></RequireAuth>} />
           <Route path="/login" element={<Login />} />
           <Route
             path="/"

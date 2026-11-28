@@ -171,6 +171,9 @@ class AutomationDatabaseTests(unittest.IsolatedAsyncioTestCase):
             manifest["scenes"].append({"narration": "The lantern glowed beside the old tree.", "visual": "The garden settles."})
         manifest["scenes"] = manifest["scenes"][:8]
         async with self.sessions() as session:
+            series = await session.get(VideoSeries, "series-1")
+            series.music_data = b"test worker track"
+            series.music_name = "music.mp3"
             run = VideoRun(id="00000000-0000-0000-0000-000000000001", series_id="series-1", status="queued", stage="generate")
             session.add(run)
             await session.commit()
@@ -181,7 +184,8 @@ class AutomationDatabaseTests(unittest.IsolatedAsyncioTestCase):
             ):
                 fake_renderer = types.ModuleType("app.video_renderer")
 
-                async def render(_manifest, output_dir, *, voice):
+                async def render(_manifest, output_dir, *, voice, music_path):
+                    self.assertEqual(music_path.read_bytes(), b"test worker track")
                     video = output_dir / "video.mp4"
                     thumbnail = output_dir / "thumbnail.jpg"
                     video.write_bytes(b"fake video")
@@ -193,6 +197,7 @@ class AutomationDatabaseTests(unittest.IsolatedAsyncioTestCase):
                 with (
                     patch.object(provider_models, "generate_text", AsyncMock(return_value=json.dumps(manifest)), create=True),
                     patch.object(provider_models, "list_generation_models", lambda: ["fake-model"], create=True),
+                    patch("app.video_renderer", fake_renderer, create=True),
                     patch.dict(sys.modules, {"app.video_renderer": fake_renderer}),
                     patch("app.automation.service.youtube.upload_video", new=AsyncMock(side_effect=AssertionError("review must wait"))),
                 ):

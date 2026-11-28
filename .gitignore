@@ -2,6 +2,7 @@ __pycache__/
 *.pyc
 .venv/
 .env
+youtube-client.local.json
 *.db
 *.db-journal
 *.log

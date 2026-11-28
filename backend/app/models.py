@@ -2,6 +2,7 @@ import uuid
 from datetime import datetime, timezone
 
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     DateTime,
     ForeignKey,
@@ -26,6 +27,15 @@ def new_id() -> str:
 
 class Base(DeclarativeBase):
     pass
+
+
+class Reminder(Base):
+    __tablename__ = "reminders"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    title: Mapped[str] = mapped_column(String(240))
+    due: Mapped[int] = mapped_column(BigInteger, index=True)
+    next_attempt: Mapped[int | None] = mapped_column(BigInteger, index=True)
+    done: Mapped[bool] = mapped_column(default=False)
 
 
 class Project(Base):

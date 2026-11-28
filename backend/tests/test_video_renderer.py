@@ -29,3 +29,11 @@ class VideoRendererTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(Path(result["thumbnail_path"]).is_file())
             self.assertEqual(result["checks"]["full_decode"],"passed")
             self.assertEqual(result["duration_seconds"],30)
+            from app.video_renderer import _command, _ffmpeg
+            track = Path(directory) / "track.mp3"
+            await _command(_ffmpeg(), "-f", "lavfi", "-i", "sine=frequency=880:duration=0.4", str(track))
+            mixed = await render_video({"scenes": [{"narration": "Test"}]}, Path(directory), music_path=track)
+            self.assertEqual(mixed["checks"]["music"], "uploaded")
+            sample = await _command(_ffmpeg(), "-ss", "10", "-i", mixed["path"], "-t", "0.1",
+                                    "-map", "0:a", "-ac", "1", "-ar", "8000", "-f", "s16le", "-")
+            self.assertGreater(max(abs(v[0]) for v in struct.iter_unpack("<h", sample)), 100)

@@ -13,6 +13,7 @@ class AutomationMigrationTests(unittest.TestCase):
         from tempfile import TemporaryDirectory
         from alembic import command
         from alembic.config import Config
+        from alembic.script import ScriptDirectory
         from sqlalchemy.ext.asyncio import create_async_engine
         from sqlalchemy import text
         with TemporaryDirectory() as directory:
@@ -25,7 +26,7 @@ class AutomationMigrationTests(unittest.TestCase):
                 engine = create_async_engine(url)
                 try:
                     async with engine.connect() as connection:
-                        self.assertEqual(await connection.scalar(text("select version_num from alembic_version")),"0007_project_chat_schema")
+                        self.assertEqual(await connection.scalar(text("select version_num from alembic_version")),ScriptDirectory.from_config(config).get_current_head())
                         columns = await connection.run_sync(lambda c: {item["name"] for item in inspect(c).get_columns("automation_runs")})
                         self.assertTrue({"retry_count","next_attempt_at"}.issubset(columns))
                 finally:

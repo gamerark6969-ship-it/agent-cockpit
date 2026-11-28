@@ -33,7 +33,8 @@ def _safe_error(response: httpx.Response) -> str:
 
 
 async def authorization_url(session: AsyncSession) -> str:
-    if not cfg.youtube_configured:
+    credentials = cfg.youtube_credentials()
+    if credentials is None:
         raise HTTPException(status_code=503, detail="YouTube OAuth is not configured")
     state = secrets.token_urlsafe(32)
     digest = hashlib.sha256(state.encode()).hexdigest()
@@ -42,7 +43,7 @@ async def authorization_url(session: AsyncSession) -> str:
     session.add(OAuthState(state_hash=digest, expires_at=now + timedelta(minutes=10)))
     await session.commit()
     params = {
-        "client_id": cfg.youtube_client_id,
+        "client_id": credentials[0],
         "redirect_uri": cfg.youtube_redirect_uri,
         "response_type": "code",
         "scope": SCOPES,
@@ -55,7 +56,8 @@ async def authorization_url(session: AsyncSession) -> str:
 
 
 async def oauth_callback(session: AsyncSession, *, code: str, state: str) -> None:
-    if not cfg.youtube_configured:
+    credentials = cfg.youtube_credentials()
+    if credentials is None:
         raise HTTPException(status_code=503, detail="YouTube OAuth is not configured")
     digest = hashlib.sha256(state.encode()).hexdigest()
     now = datetime.now(timezone.utc)
@@ -72,8 +74,8 @@ async def oauth_callback(session: AsyncSession, *, code: str, state: str) -> Non
                 GOOGLE_TOKEN,
                 data={
                     "code": code,
-                    "client_id": cfg.youtube_client_id,
-                    "client_secret": cfg.youtube_client_secret,
+                    "client_id": credentials[0],
+                    "client_secret": credentials[1],
                     "redirect_uri": cfg.youtube_redirect_uri,
                     "grant_type": "authorization_code",
                 },
@@ -126,15 +128,16 @@ async def _access_token(session: AsyncSession) -> str:
     tokens = decrypt_json(credential.tokens_enc)
     if tokens.get("access_token") and int(tokens.get("expires_at", 0)) > int(datetime.now(timezone.utc).timestamp()) + 60:
         return tokens["access_token"]
-    if not tokens.get("refresh_token") or not cfg.youtube_configured:
+    credentials = cfg.youtube_credentials()
+    if not tokens.get("refresh_token") or credentials is None:
         raise RuntimeError("YouTube credentials need to be reconnected")
     async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
         try:
             response = await client.post(
                 GOOGLE_TOKEN,
                 data={
-                    "client_id": cfg.youtube_client_id,
-                    "client_secret": cfg.youtube_client_secret,
+                    "client_id": credentials[0],
+                    "client_secret": credentials[1],
                     "refresh_token": tokens["refresh_token"],
                     "grant_type": "refresh_token",
                 },

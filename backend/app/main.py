@@ -13,6 +13,7 @@ from .api.routes import public_router, router
 from .connectors import seed_from_env as seed_connectors_from_env
 from .config import settings
 from .db import engine, seed_settings
+from .reminders import reminder_loop, router as reminders_router
 from .keepalive import keepalive_loop
 from .rate_limit import SlidingWindowLimiter
 from .worker import Worker
@@ -88,11 +89,15 @@ async def lifespan(app: FastAPI):
         await worker.resume_interrupted_tasks()
         await worker.start()
     await automation_service.start()
+    reminders_task = asyncio.create_task(reminder_loop()) if settings.BACKGROUND_WORKER_ENABLED else None
     keepalive_task = asyncio.create_task(keepalive_loop())
     log.info("backend started (worker running)")
     try:
         yield
     finally:
+        if reminders_task:
+            reminders_task.cancel()
+            await asyncio.gather(reminders_task, return_exceptions=True)
         keepalive_task.cancel()
         await automation_service.stop()
         await worker.stop()
@@ -113,6 +118,7 @@ app.add_middleware(
     allow_headers=["Authorization", "Content-Type"],
 )
 
+app.include_router(reminders_router)
 app.include_router(public_router)
 app.include_router(router)
 app.include_router(automation_public_router)

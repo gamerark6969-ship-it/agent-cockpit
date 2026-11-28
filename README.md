@@ -1,5 +1,15 @@
 # Agent Cockpit — mobile-first autonomous AI software engineer
 
+## Run the Studio from your phone using this Windows PC
+
+From the workspace, run `./Start-Studio.ps1` in PowerShell. The launcher builds the phone interface and starts the API, video scheduler, and reminder worker together. A fresh installation needs Python 3.12 and Node.js 22 with npm. Your PC must stay awake for scheduled work. This mode uses local CPU, disk, and Docker for coding workspaces, with $0 in hosting fees. Model providers apply their own quotas or pricing.
+
+1. On the PC, open `http://localhost:8000/studio`. On a trusted Wi-Fi network, open the matching network address printed by the launcher on your phone. Sign in with `APP_TOKEN` from `backend/.env`. The launcher generates a token on first setup. Keep the token and provider keys private. For access away from home and phone push, use the [HTTPS deployment guide](docs/ZERO_COST_DEPLOYMENT.md).
+2. In **Connectors**, save your FreeGG, AgentRouter, or Xingchi account. In **Studio → New series**, enter a brief, choose a model, and select the publishing times and timezone. **Run now** produces a draft on demand. Review mode lets you watch the finished video before uploading.
+3. To enable uploads, enable YouTube Data API v3 in your Google Cloud project, then create a Web application OAuth client. Register `http://localhost:8000/api/automation/youtube/callback`. Download the client JSON and save it as `backend/youtube-client.local.json`. Refresh Studio **on the PC** and choose **Connect with Google**. Afterwards, select **Publish automatically**, your intended visibility, and **Enable daily production** from the phone. If you customize `PORT`, use the same port in Google's callback. [Google OAuth setup](https://developers.google.com/identity/protocols/oauth2/web-server)
+4. Open **Reminders** to set a date and time on your phone. Due reminders stay in the app until completed or deleted. Phone push requires the HTTPS app, VAPID keys, and notification permission. [Browser service-worker requirements](https://developer.mozilla.org/en-US/docs/Web/API/Service_Worker_API)
+5. Open **Chats → Code workspaces** for coding projects. To provision a new local workspace host, start Docker Desktop in Linux-container mode and run `docker build -f backend/Dockerfile.sandbox -t cockpit-sandbox:local backend` once from the workspace root.
+
 ## YouTube studio and zero-cost cloud runner
 
 The app now includes a **Studio** for original animated Shorts: series briefs, model selection,

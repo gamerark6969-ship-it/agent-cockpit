@@ -13,10 +13,11 @@ def _vapid_ready() -> bool:
     return bool(settings.VAPID_PUBLIC_KEY and settings.VAPID_PRIVATE_KEY)
 
 
-async def send_push_to_all(payload: dict) -> None:
+async def send_push_to_all(payload: dict) -> bool:
     """Send a web push to every subscriber. Errors are swallowed; 410 removes the sub."""
     if not _vapid_ready():
-        return
+        return False
+    delivered = False
     data = json.dumps(payload)
     subject = settings.VAPID_SUBJECT or "mailto:admin@example.com"
     dead: list[str] = []
@@ -45,6 +46,7 @@ async def send_push_to_all(payload: dict) -> None:
                     timeout=10,
                     ttl=86400,
                 )
+                delivered = True
             except WebPushException as exc:
                 status = None
                 response = getattr(exc, "response", None)
@@ -65,6 +67,7 @@ async def send_push_to_all(payload: dict) -> None:
                 await session.commit()
     except Exception:
         pass
+    return delivered
 
 
 async def push_approval_request(task_id: str, approval_id: str, description: str) -> None:

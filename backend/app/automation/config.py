@@ -1,5 +1,6 @@
 """Settings isolated from the main application settings namespace."""
 
+import json
 from pathlib import Path
 
 from pydantic import Field
@@ -18,6 +19,7 @@ class AutomationSettings(BaseSettings):
     storage_persistent: bool = False
     public_base_url: str | None = None
     media_url_ttl_s: int = Field(default=3600, ge=60, le=604800)
+    youtube_client_file: Path | None = None
     youtube_client_id: str | None = None
     youtube_client_secret: str | None = None
     youtube_redirect_uri: str | None = None
@@ -39,9 +41,31 @@ class AutomationSettings(BaseSettings):
     missed_slot_grace_minutes: int = Field(default=120, ge=0, le=1440)
     schedule_horizon_hours: int = Field(default=30, ge=1, le=72)
 
+    def youtube_credentials(self) -> tuple[str, str] | None:
+        if not self.youtube_redirect_uri:
+            return None
+        if self.youtube_client_id or self.youtube_client_secret:
+            if self.youtube_client_id and self.youtube_client_secret:
+                return self.youtube_client_id, self.youtube_client_secret
+            return None
+        if self.youtube_client_file is None:
+            return None
+        try:
+            with self.youtube_client_file.open("rb") as stream:
+                raw = stream.read(65537)
+            if len(raw) > 65536:
+                return None
+            web = json.loads(raw)["web"]
+            client_id, secret = web["client_id"], web["client_secret"]
+        except (OSError, ValueError, KeyError, TypeError, RecursionError):
+            return None
+        if all(isinstance(value, str) and value.strip() for value in (client_id, secret)):
+            return client_id, secret
+        return None
+
     @property
     def youtube_configured(self) -> bool:
-        return bool(self.youtube_client_id and self.youtube_client_secret and self.youtube_redirect_uri)
+        return self.youtube_credentials() is not None
 
     @property
     def s3_configured(self) -> bool:

@@ -28,6 +28,9 @@ jobs:
       CORS_ORIGINS: ${{ vars.FRONTEND_URL }}
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
       AUTOMATION_ENABLED: "false"
+      VAPID_PUBLIC_KEY: ${{ secrets.VAPID_PUBLIC_KEY }}
+      VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
+      VAPID_SUBJECT: ${{ vars.VAPID_SUBJECT }}
       BACKGROUND_WORKER_ENABLED: "false"
       SANDBOX_BACKEND: docker
       MAX_TASK_RUNTIME_S: "1500"
@@ -60,6 +63,8 @@ jobs:
       - name: Install free renderer and model runtime
         run: |
           pip install -r requirements.txt
+      - name: Deliver due personal reminders
+        run: python -m app.automation.run_once --reminders
       - name: Check for due work
         id: due
         run: |

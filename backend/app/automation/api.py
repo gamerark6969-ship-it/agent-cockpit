@@ -1,5 +1,8 @@
 """Public and authenticated HTTP contracts for YouTube automation."""
 
+from pathlib import Path
+from tempfile import TemporaryDirectory
+
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -9,7 +12,10 @@ from sqlalchemy import select
 from ..crypto import decrypt_json
 from ..db import SessionLocal
 from ..security import require_token
-from . import youtube
+from . import charts, youtube
+from .models import ChartTrack
+from sqlalchemy.exc import IntegrityError
+from fastapi import Path as PathParam
 from .dispatch import dispatch_worker
 from .config import automation_settings as cfg
 from .models import VideoRun, VideoRunEvent, VideoSeries, YouTubeCredential
@@ -35,6 +41,7 @@ def _series_out(series: VideoSeries) -> dict:
         "privacy": series.privacy,
         "language": series.language,
         "voice": series.voice,
+        "music_name": series.music_name,
         "made_for_kids": series.made_for_kids,
         "contains_synthetic_media": series.contains_synthetic_media,
         "created_at": series.created_at,
@@ -165,6 +172,104 @@ async def patch_series(series_id: str, payload: SeriesPatch):
         await session.commit()
         await session.refresh(series)
         return _series_out(series)
+
+
+@router.put("/series/{series_id}/music")
+async def upload_music(series_id: str, request: Request, name: str = Query(min_length=1, max_length=160)):
+    return await _set_music(series_id, name, await _read_music(request, 12))
+
+
+async def _read_music(request: Request, limit_mib: int) -> bytes:
+    from ..video_renderer import validate_music
+
+    if request.headers.get("content-type", "").split(";")[0].lower() != "audio/mpeg":
+        raise HTTPException(415, "Upload an MP3 with content type audio/mpeg")
+    track = bytearray()
+    async for chunk in request.stream():
+        if len(track) + len(chunk) > limit_mib * 1024 * 1024:
+            raise HTTPException(413, f"Music exceeds {limit_mib} MiB")
+        track.extend(chunk)
+    with TemporaryDirectory() as directory:
+        path = Path(directory) / "track.mp3"
+        path.write_bytes(track)
+        try:
+            await validate_music(path)
+        except (RuntimeError, TimeoutError, ValueError):
+            raise HTTPException(422, "Upload a decodable MP3 track")
+    return bytes(track)
+
+
+@router.delete("/series/{series_id}/music")
+async def clear_music(series_id: str):
+    return await _set_music(series_id, None, None)
+
+
+async def _set_music(series_id: str, name: str | None, data: bytes | None):
+    async with SessionLocal() as session:
+        series = await session.get(VideoSeries, series_id)
+        if series is None:
+            raise HTTPException(404, "Series not found")
+        series.music_name = name
+        series.music_data = data
+        series.updated_at = datetime.now(timezone.utc)
+        await session.commit()
+        await session.refresh(series)
+        return _series_out(series)
+
+
+async def _chart_state(session, series_id):
+    series = await session.get(VideoSeries, series_id)
+    if series is None:
+        raise HTTPException(404, "Series not found")
+    rows = (await session.scalars(select(ChartTrack).where(ChartTrack.series_id == series_id).order_by(ChartTrack.slot))).all()
+    return {"playlist_id": series.chart_playlist, "candidates": [
+        {"slot": row.slot, "video_id": row.video_id, "name": row.name} for row in rows]}
+
+
+@router.get("/series/{series_id}/chart")
+async def get_chart(series_id: str):
+    async with SessionLocal() as session:
+        return await _chart_state(session, series_id)
+
+
+@router.put("/series/{series_id}/chart")
+async def set_chart(series_id: str, playlist: str = Query(max_length=1024)):
+    try:
+        playlist_id = charts.parse_playlist(playlist)
+    except ValueError:
+        raise HTTPException(422, "Enter a YouTube playlist URL or playlist ID")
+    async with SessionLocal() as session:
+        series = await session.get(VideoSeries, series_id)
+        if series is None:
+            raise HTTPException(404, "Series not found")
+        series.chart_playlist = playlist_id
+        await session.commit()
+        return await _chart_state(session, series_id)
+
+
+@router.put("/series/{series_id}/chart/{slot}")
+async def put_candidate(series_id: str, request: Request, slot: int = PathParam(ge=1, le=3),
+                        video_id: str = Query(pattern=r"^[A-Za-z0-9_-]{11}$"), name: str = Query(min_length=1, max_length=160)):
+    audio = await _read_music(request, 4)
+    async with SessionLocal() as session:
+        if await session.get(VideoSeries, series_id) is None:
+            raise HTTPException(404, "Series not found")
+        await session.merge(ChartTrack(series_id=series_id, slot=slot, video_id=video_id, name=name, audio=audio))
+        try:
+            await session.commit()
+        except IntegrityError:
+            raise HTTPException(409, "This video or slot is already in use. Refresh the candidates and retry.")
+        return await _chart_state(session, series_id)
+
+
+@router.delete("/series/{series_id}/chart/{slot}")
+async def remove_candidate(series_id: str, slot: int = PathParam(ge=1, le=3)):
+    async with SessionLocal() as session:
+        track = await session.get(ChartTrack, (series_id, slot))
+        if track:
+            await session.delete(track)
+            await session.commit()
+        return await _chart_state(session, series_id)
 
 
 @router.post("/series/{series_id}/run", status_code=201)

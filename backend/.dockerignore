@@ -9,3 +9,4 @@ test.db
 .gitignore
 Dockerfile
 .dockerignore
+youtube-client.local.json
